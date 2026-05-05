@@ -229,7 +229,6 @@
         setTimeout(() => a.remove(), 100);
     };
 
-    // 🔥 Auto‑refresh token for every API call
     async function getValidToken() {
         if (!currentUser) throw new Error("No user");
         return await currentUser.getIdToken(true);
@@ -240,7 +239,6 @@
         const headers = { ...options.headers, "Authorization": `Bearer ${token}` };
         const res = await fetch(`${API_BASE}${url}`, { ...options, headers });
         if (res.status === 401) {
-            // Retry once with fresh token
             const newToken = await getValidToken();
             const retryHeaders = { ...options.headers, "Authorization": `Bearer ${newToken}` };
             const retryRes = await fetch(`${API_BASE}${url}`, { ...options, headers: retryHeaders });
@@ -572,7 +570,6 @@
     function openAuthModal() { document.getElementById("authModal").classList.add("active"); }
     function closeAuthModal() { document.getElementById("authModal").classList.remove("active"); }
 
-    // Event listeners
     document.getElementById("forgotPasswordLink")?.addEventListener("click", (e) => {
         e.preventDefault();
         document.getElementById("forgotPasswordForm").style.display = "block";
