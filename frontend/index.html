@@ -3,10 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>AI Studio Pro – Final Working</title>
+    <title>AI Studio Pro – Complete</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
+        /* All CSS (unchanged) – keep your existing styles */
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Inter', sans-serif;
@@ -190,7 +191,7 @@
         <div id="genResult" style="display:none; text-align:center;"><img id="genImage" class="result-img"><br><button id="downloadGenBtn" class="btn-secondary">Download</button> <button id="saveGenBtn" class="btn-secondary">Save to gallery</button></div>
     </div>
 
-    <!-- Edit Tab -->
+    <!-- Edit Tab (only face edit) -->
     <div id="editTab" class="tab-pane" style="display:none;">
         <div class="glass-card" style="padding:1.8rem;">
             <h3>🖌️ Face‑preserving editor</h3>
@@ -264,7 +265,7 @@
     </div>
 </div>
 
-<!-- Payment Modal -->
+<!-- Payment Modal (Stripe) -->
 <div id="paymentModal" class="modal-overlay">
     <div class="modal-content" style="text-align: left;">
         <h3>💳 Secure Checkout</h3>
@@ -299,7 +300,8 @@
     import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut, updateProfile, sendPasswordResetEmail } from "firebase/auth";
     import { getFirestore, doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
 
-    const API_BASE = "/api";
+    const API_BASE = "http://localhost:3000/api";
+
     const firebaseConfig = {
         apiKey: "AIzaSyAe8-hjKY0OXgiMsyA2nf4Qup-KCrWKOw8",
         authDomain: "future-mystery-495215-d8.firebaseapp.com",
@@ -309,15 +311,22 @@
         appId: "1:768195103837:web:e74c69b1dff4ece58651b4",
         measurementId: "G-7P5TBH6NJ8"
     };
+
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
     const db = getFirestore(app, "mydata");
 
-    let currentUser = null, idToken = null;
+    // ---------- Global state ----------
+    let currentUser = null;
+    let idToken = null;
     let credits = 20, gallery = [], lastDaily = null, totalGenerations = 0;
     let currentGenImage = null, currentEditImg = null, activeStyle = "realistic";
     let subscription = { plan: "free", expiry: null };
-    let stripe = null, card = null, clientSecret = null, pendingPlan = null;
+    let stripe = null;
+    let elements = null;
+    let card = null;
+    let clientSecret = null;
+    let pendingPlan = null;
 
     function showToast(msg, isErr = false) {
         const toast = document.createElement("div");
@@ -327,40 +336,68 @@
         setTimeout(() => toast.remove(), 3000);
     }
 
-    async function loadUserCreditsFromFirestore(uid) {
+    async function saveUserToFirestore(user, additionalData = {}) {
+        if (!user) return false;
+        const userRef = doc(db, "users", user.uid);
         try {
-            const docRef = doc(db, "users", uid);
-            const userDoc = await getDoc(docRef);
-            if (userDoc.exists()) {
-                const data = userDoc.data();
-                credits = data.credits !== undefined ? data.credits : 20;
-                subscription.plan = data.subscriptionPlan || "free";
-                subscription.expiry = data.subscriptionExpiry || null;
-                localStorage.setItem(`credits_${uid}`, credits);
-                localStorage.setItem(`subscription_plan_${uid}`, subscription.plan);
-                if (subscription.expiry) localStorage.setItem(`subscription_expiry_${uid}`, subscription.expiry);
-            } else {
-                // First time: create doc with 20 credits
-                await setDoc(docRef, { credits: 20, createdAt: serverTimestamp() });
-                credits = 20;
-                localStorage.setItem(`credits_${uid}`, 20);
+            const snap = await getDoc(userRef);
+            if (!snap.exists()) {
+                const firstName = additionalData.firstName || (user.displayName ? user.displayName.split(" ")[0] : "");
+                const lastName = additionalData.lastName || (user.displayName ? user.displayName.split(" ").slice(1).join(" ") : "");
+                await setDoc(userRef, {
+                    firstName, lastName,
+                    email: user.email, uid: user.uid,
+                    photoURL: user.photoURL || "",
+                    credits: 20,
+                    createdAt: serverTimestamp()
+                });
+                console.log("✅ User saved to Firestore");
             }
-            updateUI();
+            return true;
         } catch (err) {
-            console.error("Firestore load error:", err);
+            console.error("Firestore error:", err);
+            return false;
         }
     }
 
-    async function saveUserToFirestore(user, additionalData = {}) {
-        if (!user) return;
-        const userRef = doc(db, "users", user.uid);
-        const firstName = additionalData.firstName || (user.displayName ? user.displayName.split(" ")[0] : "");
-        const lastName = additionalData.lastName || (user.displayName ? user.displayName.split(" ").slice(1).join(" ") : "");
-        const baseData = {
-            firstName, lastName, email: user.email, uid: user.uid,
-            photoURL: user.photoURL || "", createdAt: serverTimestamp()
-        };
-        await setDoc(userRef, baseData, { merge: true });
+    function updateNavbarAfterLogin(user) {
+        const avatarDiv = document.getElementById("userAvatarBtn");
+        if (!avatarDiv) return;
+        if (user && user.photoURL) avatarDiv.innerHTML = `<img src="${user.photoURL}" class="avatar">`;
+        else if (user) avatarDiv.innerHTML = `<i class="fas fa-user-check"></i>`;
+        else avatarDiv.innerHTML = `<i class="fas fa-user-astronaut"></i>`;
+    }
+
+    async function fetchCredits() {
+        if (!currentUser) return;
+        const token = await currentUser.getIdToken();
+        const res = await fetch(`${API_BASE}/user/credits`, {
+            headers: { "Authorization": `Bearer ${token}` }
+        });
+        const data = await res.json();
+        credits = data.credits;
+        updateUI();
+    }
+
+    async function claimDaily() {
+        if (!currentUser) { showToast("Please sign in first", true); return; }
+        const token = await currentUser.getIdToken();
+        try {
+            const res = await fetch(`${API_BASE}/daily-reward`, {
+                method: "POST",
+                headers: { "Authorization": `Bearer ${token}` }
+            });
+            const data = await res.json();
+            if (data.success) {
+                credits = data.credits;
+                updateUI();
+                showToast("🎉 +10 credits! Daily reward claimed.");
+            } else {
+                showToast(data.error || "Already claimed today", true);
+            }
+        } catch (err) {
+            showToast("Failed to claim daily reward", true);
+        }
     }
 
     function loadUserData() {
@@ -375,7 +412,8 @@
             subscription.plan = localStorage.getItem(`subscription_plan_${currentUser.uid}`) || "free";
             subscription.expiry = localStorage.getItem(`subscription_expiry_${currentUser.uid}`) || null;
         }
-        updateUI(); renderGallery();
+        updateUI();
+        renderGallery();
     }
     function saveUserData() {
         if (!currentUser) return;
@@ -409,20 +447,30 @@
         const dailyBtn = document.getElementById("dailyRewardBtn");
         if (!dailyBtn) return;
         let timerSpan = document.getElementById("dailyTimer");
-        if (!timerSpan) { timerSpan = document.createElement("span"); timerSpan.id = "dailyTimer"; dailyBtn.appendChild(timerSpan); }
+        if (!timerSpan) {
+            timerSpan = document.createElement("span");
+            timerSpan.id = "dailyTimer";
+            dailyBtn.appendChild(timerSpan);
+        }
         if (lastDaily && (Date.now() - lastDaily) < 86400000) {
             const hoursLeft = Math.ceil((86400000 - (Date.now() - lastDaily)) / 3600000);
             timerSpan.innerText = `(${hoursLeft}h left)`;
-            dailyBtn.style.opacity = "0.6"; dailyBtn.style.pointerEvents = "none";
+            dailyBtn.style.opacity = "0.6";
+            dailyBtn.style.pointerEvents = "none";
         } else {
-            timerSpan.innerText = ""; dailyBtn.style.opacity = "1"; dailyBtn.style.pointerEvents = "auto";
+            timerSpan.innerText = "";
+            dailyBtn.style.opacity = "1";
+            dailyBtn.style.pointerEvents = "auto";
         }
     }
 
     function renderGallery() {
         const container = document.getElementById("galleryContainer");
         if (!container) return;
-        if (!gallery.length) { container.innerHTML = "<p style='text-align:center'>No saved images</p>"; return; }
+        if (!gallery.length) {
+            container.innerHTML = "<p style='text-align:center'>No saved images</p>";
+            return;
+        }
         container.innerHTML = "";
         gallery.forEach(imgUrl => {
             const div = document.createElement("div");
@@ -432,9 +480,17 @@
             container.appendChild(div);
         });
     }
-    function downloadUrl(url) { const a = document.createElement("a"); a.href = url; a.download = `ai_image_${Date.now()}.png`; a.click(); setTimeout(() => a.remove(), 100); }
 
-    // Auth functions
+    function downloadUrl(url) {
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `ai_image_${Date.now()}.png`;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => a.remove(), 100);
+    }
+
+    // ---------- Auth functions ----------
     async function signupWithEmail() {
         const first = document.getElementById("signupFirst").value.trim();
         const last = document.getElementById("signupLast").value.trim();
@@ -451,6 +507,7 @@
             closeAuthModal();
         } catch (err) { showToast(err.message, true); }
     }
+
     async function loginWithEmail() {
         const email = document.getElementById("loginEmail").value.trim();
         const password = document.getElementById("loginPassword").value;
@@ -461,116 +518,139 @@
             closeAuthModal();
         } catch (err) { showToast(err.message, true); }
     }
+
     async function loginWithGoogle() {
         const provider = new GoogleAuthProvider();
         try {
             await signInWithPopup(auth, provider);
             showToast("Google Login Successful ✅");
             closeAuthModal();
-        } catch (err) { showToast(err.message, true); document.getElementById("googleErrorMsg").innerText = err.message; }
+        } catch (err) {
+            if (err.code === "auth/operation-not-allowed") {
+                showToast("Google Sign-In not enabled in Firebase Console.", true);
+            } else {
+                showToast(err.message, true);
+            }
+            document.getElementById("googleErrorMsg").innerText = err.message;
+        }
     }
-    async function logout() { await signOut(auth); localStorage.clear(); window.location.reload(); }
 
-    // Forgot password
-    document.getElementById("forgotPasswordLink")?.addEventListener("click", (e) => { e.preventDefault(); document.getElementById("forgotPasswordForm").style.display = "block"; });
+    async function logout() {
+        await signOut(auth);
+        localStorage.clear();
+        window.location.reload();
+    }
+
+    // Forgot password handlers
+    document.getElementById("forgotPasswordLink")?.addEventListener("click", (e) => {
+        e.preventDefault();
+        document.getElementById("forgotPasswordForm").style.display = "block";
+    });
     document.getElementById("sendResetBtn")?.addEventListener("click", async () => {
         const email = document.getElementById("resetEmail").value.trim();
         if (!email) { showToast("Enter your email address", true); return; }
-        try { await sendPasswordResetEmail(auth, email); showToast("Password reset email sent!"); document.getElementById("forgotPasswordForm").style.display = "none"; document.getElementById("resetEmail").value = ""; } catch (err) { showToast(err.message, true); }
+        try {
+            await sendPasswordResetEmail(auth, email);
+            showToast("Password reset email sent!");
+            document.getElementById("forgotPasswordForm").style.display = "none";
+            document.getElementById("resetEmail").value = "";
+        } catch (err) { showToast(err.message, true); }
     });
-    document.getElementById("cancelResetBtn")?.addEventListener("click", () => { document.getElementById("forgotPasswordForm").style.display = "none"; document.getElementById("resetEmail").value = ""; });
+    document.getElementById("cancelResetBtn")?.addEventListener("click", () => {
+        document.getElementById("forgotPasswordForm").style.display = "none";
+        document.getElementById("resetEmail").value = "";
+    });
 
-    // Stripe
+    // ---------- Stripe ----------
     async function initStripe() {
         try {
             const res = await fetch(`${API_BASE}/stripe-key`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
             if (data.publishableKey && data.publishableKey.startsWith("pk_")) {
-                stripe = Stripe(data.publishableKey); const elements = stripe.elements();
+                stripe = Stripe(data.publishableKey);
+                elements = stripe.elements();
                 card = elements.create("card", { style: { base: { color: "#fff", fontSize: "16px" } } });
                 card.mount("#card-element");
-                card.on("change", (event) => { document.getElementById("card-errors").textContent = event.error ? event.error.message : ""; });
+                card.addEventListener("change", (event) => {
+                    const displayError = document.getElementById("card-errors");
+                    displayError.textContent = event.error ? event.error.message : "";
+                });
+                console.log("✅ Stripe initialized");
             }
-        } catch (err) { console.error("Stripe init failed", err); showToast("Payment system unavailable", true); }
+        } catch (err) {
+            console.error("Stripe init failed", err);
+            showToast("Payment system unavailable: " + err.message, true);
+        }
     }
+
     async function showPaymentModal(plan, creditsAmt, price) {
         if (!stripe) await initStripe();
         if (!stripe) { showToast("Payment system unavailable", true); return; }
         if (!currentUser) { showToast("Please sign in first", true); openAuthModal(); return; }
+
         pendingPlan = { plan, creditsAmt, price };
         document.getElementById("paymentPlanName").innerText = plan.charAt(0).toUpperCase() + plan.slice(1);
         document.getElementById("paymentCredits").innerText = creditsAmt;
         document.getElementById("paymentAmount").innerText = price;
+
         const token = await currentUser.getIdToken();
-        const res = await fetch(`${API_BASE}/create-payment-intent`, {
-            method: "POST", headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-            body: JSON.stringify({ amount: price, credits: creditsAmt, planName: plan })
-        });
-        const data = await res.json();
-        if (data.clientSecret) { clientSecret = data.clientSecret; document.getElementById("paymentModal").classList.add("active"); }
-        else showToast("Failed to initiate payment", true);
-    }
-    async function handlePaymentSuccess(creditsAmount, plan = null) {
-        if (!currentUser) return false;
         try {
-            const body = { userId: currentUser.uid, credits: creditsAmount };
-            if (plan) body.plan = plan;
-            const res = await fetch(`${API_BASE}/payment-success`, {
-                method: "POST", headers: { "Content-Type": "application/json", "Authorization": `Bearer ${idToken}` }, body: JSON.stringify(body)
+            const res = await fetch(`${API_BASE}/create-payment-intent`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+                body: JSON.stringify({ amount: price, credits: creditsAmt, planName: plan })
             });
             const data = await res.json();
-            if (!data.success) throw new Error(data.error);
-            credits = data.newCredits;
-            localStorage.setItem(`credits_${currentUser.uid}`, credits);
-            updateUI();
-            return true;
-        } catch (err) { console.error("Payment success error:", err); showToast("Payment succeeded but failed to update credits", true); return false; }
-    }
-    async function confirmPayment() {
-        if (!stripe || !clientSecret) return;
-        const { error, paymentIntent } = await stripe.confirmCardPayment(clientSecret, { payment_method: { card: card } });
-        if (error) { showToast(error.message, true); document.getElementById("card-errors").innerText = error.message; }
-        else if (paymentIntent.status === "succeeded") {
-            const updated = await handlePaymentSuccess(pendingPlan.creditsAmt, pendingPlan.plan);
-            if (updated) {
-                subscription.plan = pendingPlan.plan; const expiry = new Date();
-                if (pendingPlan.plan === "weekly") expiry.setDate(expiry.getDate() + 7);
-                else if (pendingPlan.plan === "15days") expiry.setDate(expiry.getDate() + 15);
-                else if (pendingPlan.plan === "monthly") expiry.setMonth(expiry.getMonth() + 1);
-                subscription.expiry = expiry.toISOString();
-                saveUserData(); updateUI();
-                showToast(`Payment successful! +${pendingPlan.creditsAmt} credits added.`);
+            if (data.clientSecret) {
+                clientSecret = data.clientSecret;
+                document.getElementById("paymentModal").classList.add("active");
+            } else {
+                throw new Error(data.error || "No client secret");
             }
-            document.getElementById("paymentModal").classList.remove("active");
-            if (card) card.clear(); pendingPlan = null; clientSecret = null;
+        } catch (err) {
+            console.error("Payment intent error:", err);
+            showToast("Failed to initiate payment: " + err.message, true);
         }
     }
 
-    // Daily reward
-    async function claimDaily() {
-        if (!currentUser) { showToast("Please sign in first", true); return; }
-        try {
-            const res = await fetch(`${API_BASE}/daily-reward`, {
-                method: "POST", headers: { "Content-Type": "application/json", "Authorization": `Bearer ${idToken}` },
-                body: JSON.stringify({ userId: currentUser.uid })
-            });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || "Failed to claim");
-            credits = data.newCredits;
-            localStorage.setItem(`credits_${currentUser.uid}`, credits);
+    async function confirmPayment() {
+        if (!stripe || !clientSecret) return;
+        const { error, paymentIntent } = await stripe.confirmCardPayment(clientSecret, { payment_method: { card: card } });
+        if (error) {
+            showToast(error.message, true);
+            document.getElementById("card-errors").innerText = error.message;
+        } else if (paymentIntent.status === "succeeded") {
+            credits += pendingPlan.creditsAmt;
+            subscription.plan = pendingPlan.plan;
+            const expiry = new Date();
+            if (pendingPlan.plan === "weekly") expiry.setDate(expiry.getDate() + 7);
+            else if (pendingPlan.plan === "15days") expiry.setDate(expiry.getDate() + 15);
+            else if (pendingPlan.plan === "monthly") expiry.setMonth(expiry.getMonth() + 1);
+            subscription.expiry = expiry.toISOString();
+            saveUserData();
             updateUI();
-            showToast(data.message || "+10 credits added!");
-        } catch (err) { console.error("Daily reward error:", err); showToast(err.message, true); }
+            showToast(`Payment successful! +${pendingPlan.creditsAmt} credits added.`);
+            document.getElementById("paymentModal").classList.remove("active");
+            if (card) card.clear();
+            pendingPlan = null;
+            clientSecret = null;
+        }
     }
 
-    // AI functions (generate, edit, enhance, saveCurrentToGallery, fetchWithAuth) – unchanged
+    // ---------- AI API calls ----------
     async function fetchWithAuth(url, options = {}) {
         if (!idToken) throw new Error("No auth token");
         const headers = { ...options.headers, "Authorization": `Bearer ${idToken}` };
         const res = await fetch(`${API_BASE}${url}`, { ...options, headers });
-        if (res.status === 401) { showToast("Session expired, please login again", true); logout(); throw new Error("Unauthorized"); }
+        if (res.status === 401) {
+            showToast("Session expired, please login again", true);
+            logout();
+            throw new Error("Unauthorized");
+        }
         return res;
     }
+
     async function generate() {
         if (!currentUser) { showToast("Please sign in first", true); return; }
         const prompt = document.getElementById("genPrompt").value.trim();
@@ -580,76 +660,100 @@
         document.getElementById("genResult").style.display = "none";
         try {
             const res = await fetchWithAuth("/generate", {
-                method: "POST", headers: { "Content-Type": "application/json" },
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ prompt, style: activeStyle })
             });
             const data = await res.json();
             if (!data.success) throw new Error(data.error);
-            currentGenImage = data.imageUrl; document.getElementById("genImage").src = currentGenImage;
-            credits--; totalGenerations++; saveUserData(); updateUI();
+            currentGenImage = data.imageUrl;
+            document.getElementById("genImage").src = currentGenImage;
+            credits--;
+            totalGenerations++;
+            saveUserData();
+            updateUI();
             document.getElementById("genLoader").style.display = "none";
             document.getElementById("genResult").style.display = "block";
             showToast("Generated!");
-        } catch (err) { showToast(err.message, true); document.getElementById("genLoader").style.display = "none"; }
+        } catch (err) {
+            showToast(err.message, true);
+            document.getElementById("genLoader").style.display = "none";
+        }
     }
+
     async function editImage() {
         if (!currentUser) { showToast("Please sign in", true); return; }
         const file = document.getElementById("editUpload").files[0];
         const editDesc = document.getElementById("editPrompt").value;
         if (!file || !editDesc) { showToast("Select image and edit description", true); return; }
         if (credits < 2) { showToast("Need 2 credits", true); return; }
-        const fd = new FormData(); fd.append("image", file); fd.append("prompt", editDesc);
+        const fd = new FormData();
+        fd.append("image", file);
+        fd.append("prompt", editDesc);
         document.getElementById("editLoader").style.display = "block";
         document.getElementById("editResult").style.display = "none";
         try {
             const res = await fetchWithAuth("/edit", { method: "POST", body: fd });
             const data = await res.json();
             if (!data.success) throw new Error(data.error);
-            currentEditImg = data.imageUrl; document.getElementById("editResultImg").src = currentEditImg;
-            credits -= 2; saveUserData(); updateUI();
+            currentEditImg = data.imageUrl;
+            document.getElementById("editResultImg").src = currentEditImg;
+            credits -= 2;
+            saveUserData();
+            updateUI();
             document.getElementById("editLoader").style.display = "none";
             document.getElementById("editResult").style.display = "block";
             showToast("Edited (face preserved)");
-        } catch (err) { showToast(err.message, true); document.getElementById("editLoader").style.display = "none"; }
+        } catch (err) {
+            showToast(err.message, true);
+            document.getElementById("editLoader").style.display = "none";
+        }
     }
+
     async function enhancePrompt() {
         const prompt = document.getElementById("genPrompt").value;
         if (!prompt) return;
         showToast("Enhancing...");
-        setTimeout(() => { document.getElementById("genPrompt").value = prompt + ", ultra detailed, 4k, masterpiece"; showToast("Enhanced"); }, 500);
+        setTimeout(() => {
+            document.getElementById("genPrompt").value = prompt + ", ultra detailed, 4k, masterpiece";
+            showToast("Enhanced");
+        }, 500);
     }
+
     function saveCurrentToGallery(isEdited = false) {
         const img = isEdited ? currentEditImg : currentGenImage;
         if (!img) { showToast("No image to save", true); return; }
-        gallery.unshift(img); saveUserData(); renderGallery(); showToast("Saved to gallery");
+        gallery.unshift(img);
+        saveUserData();
+        renderGallery();
+        showToast("Saved to gallery");
     }
 
-    // Auth state listener
+    // ---------- Auth state ----------
     onAuthStateChanged(auth, async (user) => {
         currentUser = user;
         if (user) {
             idToken = await user.getIdToken();
             await saveUserToFirestore(user);
-            await loadUserCreditsFromFirestore(user.uid);
             updateNavbarAfterLogin(user);
-            loadUserData();
+            // Load credits from Firestore via API
+            await fetchCredits();
+            loadUserData(); // loads gallery etc from localStorage
             closeAuthModal();
         } else {
-            idToken = null; updateNavbarAfterLogin(null); loadUserData(); openAuthModal();
+            idToken = null;
+            updateNavbarAfterLogin(null);
+            loadUserData();
+            openAuthModal();
         }
     });
-    function updateNavbarAfterLogin(user) {
-        const avatarDiv = document.getElementById("userAvatarBtn");
-        if (!avatarDiv) return;
-        if (user && user.photoURL) avatarDiv.innerHTML = `<img src="${user.photoURL}" class="avatar">`;
-        else if (user) avatarDiv.innerHTML = `<i class="fas fa-user-check"></i>`;
-        else avatarDiv.innerHTML = `<i class="fas fa-user-astronaut"></i>`;
-    }
+
+    // ---------- Event listeners ----------
     function openAuthModal() { document.getElementById("authModal").classList.add("active"); }
     function closeAuthModal() { document.getElementById("authModal").classList.remove("active"); }
 
     document.addEventListener("DOMContentLoaded", () => {
-        // Avatar click
+        // Avatar menu
         document.getElementById("userAvatarBtn")?.addEventListener("click", () => {
             if (currentUser) {
                 const existing = document.querySelector(".user-menu");
@@ -667,13 +771,18 @@
                 document.getElementById("logoutBtnFromMenu").addEventListener("click", logout);
                 setTimeout(() => {
                     const closeHandler = (e) => {
-                        if (!menu.contains(e.target) && e.target !== document.getElementById("userAvatarBtn")) { menu.remove(); document.removeEventListener("click", closeHandler); }
+                        if (!menu.contains(e.target) && e.target !== document.getElementById("userAvatarBtn")) {
+                            menu.remove();
+                            document.removeEventListener("click", closeHandler);
+                        }
                     };
                     document.addEventListener("click", closeHandler);
                 }, 100);
-            } else { openAuthModal(); }
+            } else {
+                openAuthModal();
+            }
         });
-        // Auth modal buttons
+
         document.getElementById("closeAuthBtn")?.addEventListener("click", closeAuthModal);
         document.getElementById("showSignupLink")?.addEventListener("click", (e) => { e.preventDefault(); document.getElementById("loginForm").style.display = "none"; document.getElementById("signupForm").style.display = "block"; });
         document.getElementById("showLoginLink")?.addEventListener("click", (e) => { e.preventDefault(); document.getElementById("signupForm").style.display = "none"; document.getElementById("loginForm").style.display = "block"; });
@@ -681,7 +790,7 @@
         document.getElementById("doSignupBtn")?.addEventListener("click", signupWithEmail);
         document.getElementById("googleSignInBtn")?.addEventListener("click", loginWithGoogle);
         document.getElementById("googleSignupBtn")?.addEventListener("click", loginWithGoogle);
-        // AI buttons
+
         document.getElementById("genBtn")?.addEventListener("click", generate);
         document.getElementById("enhanceBtn")?.addEventListener("click", enhancePrompt);
         document.getElementById("editBtn")?.addEventListener("click", editImage);
@@ -690,7 +799,8 @@
         document.getElementById("downloadGenBtn")?.addEventListener("click", () => currentGenImage && downloadUrl(currentGenImage));
         document.getElementById("downloadEditBtn")?.addEventListener("click", () => currentEditImg && downloadUrl(currentEditImg));
         document.getElementById("dailyRewardBtn")?.addEventListener("click", claimDaily);
-        // Subscription
+
+        // Subscription buttons
         document.querySelectorAll(".subscribeBtn").forEach(btn => {
             btn.addEventListener("click", () => {
                 if (!currentUser) { showToast("Please sign in first", true); openAuthModal(); return; }
@@ -702,6 +812,7 @@
         document.getElementById("applePayMock")?.addEventListener("click", () => showToast("Apple Pay coming soon", true));
         document.getElementById("googlePayMock")?.addEventListener("click", () => showToast("Google Pay coming soon", true));
         document.getElementById("upgradePlanBtn")?.addEventListener("click", () => document.getElementById("paymentModal").classList.add("active"));
+
         // Tabs
         document.querySelectorAll(".tab").forEach(tab => {
             tab.addEventListener("click", () => {
@@ -714,6 +825,7 @@
                 if (target === "gallery") renderGallery();
             });
         });
+
         // Style cards
         document.querySelectorAll(".style-card").forEach(card => {
             card.addEventListener("click", () => {
@@ -722,6 +834,7 @@
                 activeStyle = card.dataset.style;
             });
         });
+
         // Upload zone
         const zone = document.getElementById("uploadZone");
         const fileInput = document.getElementById("editUpload");
@@ -742,6 +855,7 @@
                 }
             });
         }
+
         loadUserData();
         initStripe();
     });
