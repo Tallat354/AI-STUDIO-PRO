@@ -3,10 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>AI Studio Pro – Complete Working</title>
+    <title>AI Studio Pro – Final Working</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
+        /* Your existing CSS – unchanged */
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Inter', sans-serif;
@@ -297,10 +298,10 @@
 <script type="module">
     import { initializeApp } from "firebase/app";
     import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut, updateProfile, sendPasswordResetEmail } from "firebase/auth";
-    import { getFirestore, doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
+    import { getFirestore, doc, getDoc, setDoc, updateDoc, increment, serverTimestamp } from "firebase/firestore";
 
-    // ✅ IMPORTANT: Set this to your backend URL (Render deployment)
-    const API_BASE = "https://ai-studio-pro-lquw.onrender.com/api";   // Change to your Render backend URL
+    // 👇 IMPORTANT: change to your actual backend Render URL
+    const API_BASE = "https://ai-studio-pro-lquw.onrender.com/api";   // Your backend URL
 
     const firebaseConfig = {
         apiKey: "AIzaSyAe8-hjKY0OXgiMsyA2nf4Qup-KCrWKOw8",
@@ -308,8 +309,7 @@
         projectId: "future-mystery-495215-d8",
         storageBucket: "future-mystery-495215-d8.firebasestorage.app",
         messagingSenderId: "768195103837",
-        appId: "1:768195103837:web:e74c69b1dff4ece58651b4",
-        measurementId: "G-7P5TBH6NJ8"
+        appId: "1:768195103837:web:e74c69b1dff4ece58651b4"
     };
 
     const app = initializeApp(firebaseConfig);
@@ -319,8 +319,13 @@
     // ---------- Global state ----------
     let currentUser = null;
     let idToken = null;
-    let credits = 20, gallery = [], lastDaily = null, totalGenerations = 0;
-    let currentGenImage = null, currentEditImg = null, activeStyle = "realistic";
+    let credits = 0;
+    let gallery = [];
+    let lastDaily = null;
+    let totalGenerations = 0;
+    let currentGenImage = null;
+    let currentEditImg = null;
+    let activeStyle = "realistic";
     let subscription = { plan: "free", expiry: null };
     let stripe = null;
     let elements = null;
@@ -336,136 +341,38 @@
         setTimeout(() => toast.remove(), 3000);
     }
 
-    async function saveUserToFirestore(user, additionalData = {}) {
-        if (!user) return false;
+    // ---------- Firestore operations ----------
+    async function loadUserFromFirestore(user) {
+        if (!user) return;
         const userRef = doc(db, "users", user.uid);
-        try {
-            const snap = await getDoc(userRef);
-            if (!snap.exists()) {
-                const firstName = additionalData.firstName || (user.displayName ? user.displayName.split(" ")[0] : "");
-                const lastName = additionalData.lastName || (user.displayName ? user.displayName.split(" ").slice(1).join(" ") : "");
-                await setDoc(userRef, {
-                    firstName, lastName,
-                    email: user.email, uid: user.uid,
-                    photoURL: user.photoURL || "",
-                    credits: 20,
-                    createdAt: serverTimestamp()
-                });
-                console.log("✅ User saved to Firestore");
-            } else {
-                // Ensure credits field exists
-                if (snap.data().credits === undefined) {
-                    await userRef.update({ credits: 20 });
-                }
-            }
-            return true;
-        } catch (err) {
-            console.error("Firestore error:", err);
-            return false;
-        }
-    }
-
-    function updateNavbarAfterLogin(user) {
-        const avatarDiv = document.getElementById("userAvatarBtn");
-        if (!avatarDiv) return;
-        if (user && user.photoURL) avatarDiv.innerHTML = `<img src="${user.photoURL}" class="avatar">`;
-        else if (user) avatarDiv.innerHTML = `<i class="fas fa-user-check"></i>`;
-        else avatarDiv.innerHTML = `<i class="fas fa-user-astronaut"></i>`;
-    }
-
-    // ---------- Data persistence (localStorage) ----------
-    function loadUserData() {
-        if (!currentUser) {
-            credits = 20; gallery = []; totalGenerations = 0;
-            subscription = { plan: "free", expiry: null };
-            lastDaily = null;
+        const snap = await getDoc(userRef);
+        if (snap.exists()) {
+            const data = snap.data();
+            credits = data.credits || 20;
+            lastDaily = data.lastDailyClaim;
         } else {
-            credits = parseInt(localStorage.getItem(`credits_${currentUser.uid}`) || "20");
-            gallery = JSON.parse(localStorage.getItem(`gallery_${currentUser.uid}`) || "[]");
-            lastDaily = localStorage.getItem(`daily_ts_${currentUser.uid}`) ? parseInt(localStorage.getItem(`daily_ts_${currentUser.uid}`)) : null;
-            totalGenerations = parseInt(localStorage.getItem(`total_generations_${currentUser.uid}`) || "0");
-            subscription.plan = localStorage.getItem(`subscription_plan_${currentUser.uid}`) || "free";
-            subscription.expiry = localStorage.getItem(`subscription_expiry_${currentUser.uid}`) || null;
+            // Create new user document
+            await setDoc(userRef, {
+                credits: 20,
+                lastDailyClaim: null,
+                createdAt: serverTimestamp()
+            });
+            credits = 20;
         }
         updateUI();
-        renderGallery();
     }
-    function saveUserData() {
+
+    async function syncCreditsFromFirestore() {
         if (!currentUser) return;
-        localStorage.setItem(`credits_${currentUser.uid}`, credits);
-        localStorage.setItem(`gallery_${currentUser.uid}`, JSON.stringify(gallery));
-        if (lastDaily) localStorage.setItem(`daily_ts_${currentUser.uid}`, lastDaily);
-        localStorage.setItem(`total_generations_${currentUser.uid}`, totalGenerations);
-        localStorage.setItem(`subscription_plan_${currentUser.uid}`, subscription.plan);
-        if (subscription.expiry) localStorage.setItem(`subscription_expiry_${currentUser.uid}`, subscription.expiry);
-        updateUI();
-    }
-
-    function updateUI() {
-        document.getElementById("creditDisplay").innerText = credits;
-        if (document.getElementById("dashCredits")) document.getElementById("dashCredits").innerText = credits;
-        if (document.getElementById("dashCount")) document.getElementById("dashCount").innerText = gallery.length;
-        if (document.getElementById("dashTotalGen")) document.getElementById("dashTotalGen").innerText = totalGenerations;
-        if (document.getElementById("subPlanText")) document.getElementById("subPlanText").innerText = subscription.plan === "free" ? "Free tier" : `${subscription.plan} plan`;
-        if (document.getElementById("subExpiry")) document.getElementById("subExpiry").innerText = subscription.expiry ? new Date(subscription.expiry).toLocaleDateString() : "—";
-        const lastPreviewImg = document.getElementById("lastPreviewImg");
-        if (lastPreviewImg) {
-            if (gallery.length && gallery[0]) lastPreviewImg.src = gallery[0];
-            else if (currentGenImage) lastPreviewImg.src = currentGenImage;
-            else lastPreviewImg.src = "";
-        }
-        if (document.getElementById("lastPreviewText")) document.getElementById("lastPreviewText").innerText = (gallery.length || currentGenImage) ? "Preview" : "No preview";
-        setDailyTimer();
-    }
-
-    function setDailyTimer() {
-        const dailyBtn = document.getElementById("dailyRewardBtn");
-        if (!dailyBtn) return;
-        let timerSpan = document.getElementById("dailyTimer");
-        if (!timerSpan) {
-            timerSpan = document.createElement("span");
-            timerSpan.id = "dailyTimer";
-            dailyBtn.appendChild(timerSpan);
-        }
-        if (lastDaily && (Date.now() - lastDaily) < 86400000) {
-            const hoursLeft = Math.ceil((86400000 - (Date.now() - lastDaily)) / 3600000);
-            timerSpan.innerText = `(${hoursLeft}h left)`;
-            dailyBtn.style.opacity = "0.6";
-            dailyBtn.style.pointerEvents = "none";
-        } else {
-            timerSpan.innerText = "";
-            dailyBtn.style.opacity = "1";
-            dailyBtn.style.pointerEvents = "auto";
+        const userRef = doc(db, "users", currentUser.uid);
+        const snap = await getDoc(userRef);
+        if (snap.exists()) {
+            credits = snap.data().credits || 20;
+            updateUI();
         }
     }
 
-    function renderGallery() {
-        const container = document.getElementById("galleryContainer");
-        if (!container) return;
-        if (!gallery.length) {
-            container.innerHTML = "<p style='text-align:center'>No saved images</p>";
-            return;
-        }
-        container.innerHTML = "";
-        gallery.forEach(imgUrl => {
-            const div = document.createElement("div");
-            div.className = "gallery-card";
-            div.onclick = () => window.open(imgUrl);
-            div.innerHTML = `<img src="${imgUrl}"><div style="padding:0.5rem;"><button class="btn-secondary" onclick="event.stopPropagation(); downloadUrl('${imgUrl}')">Download</button></div>`;
-            container.appendChild(div);
-        });
-    }
-
-    function downloadUrl(url) {
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `ai_image_${Date.now()}.png`;
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(() => a.remove(), 100);
-    }
-
-    // ---------- DAILY REWARD (FIXED) ----------
+    // ---------- Daily reward ----------
     async function claimDaily() {
         if (!currentUser) {
             showToast("Please sign in first", true);
@@ -480,10 +387,10 @@
             const data = await res.json();
             if (res.ok) {
                 credits = data.credits;
-                // Also update local storage and sync
-                saveUserData();
                 updateUI();
                 showToast(data.message);
+                // Also refresh from Firestore to be safe
+                await syncCreditsFromFirestore();
             } else {
                 showToast(data.error, true);
             }
@@ -493,87 +400,13 @@
         }
     }
 
-    // ---------- Auth functions ----------
-    async function signupWithEmail() {
-        const first = document.getElementById("signupFirst").value.trim();
-        const last = document.getElementById("signupLast").value.trim();
-        const email = document.getElementById("signupEmail").value.trim();
-        const password = document.getElementById("signupPassword").value;
-        const confirm = document.getElementById("signupConfirm").value;
-        if (!first || !last || !email || !password) { showToast("Please fill all fields", true); return; }
-        if (password !== confirm) { showToast("Passwords do not match", true); return; }
-        try {
-            const userCred = await createUserWithEmailAndPassword(auth, email, password);
-            await updateProfile(userCred.user, { displayName: `${first} ${last}` });
-            await saveUserToFirestore(userCred.user, { firstName: first, lastName: last });
-            showToast("Signup Successful ✅");
-            closeAuthModal();
-        } catch (err) { showToast(err.message, true); }
-    }
-
-    async function loginWithEmail() {
-        const email = document.getElementById("loginEmail").value.trim();
-        const password = document.getElementById("loginPassword").value;
-        if (!email || !password) { showToast("Email and password required", true); return; }
-        try {
-            const userCred = await signInWithEmailAndPassword(auth, email, password);
-            await saveUserToFirestore(userCred.user);
-            showToast("Login Successful ✅");
-            closeAuthModal();
-        } catch (err) { showToast(err.message, true); }
-    }
-
-    async function loginWithGoogle() {
-        const provider = new GoogleAuthProvider();
-        try {
-            const result = await signInWithPopup(auth, provider);
-            await saveUserToFirestore(result.user);
-            showToast("Google Login Successful ✅");
-            closeAuthModal();
-        } catch (err) {
-            if (err.code === "auth/operation-not-allowed") {
-                showToast("Google Sign-In not enabled in Firebase Console.", true);
-            } else {
-                showToast(err.message, true);
-            }
-            document.getElementById("googleErrorMsg").innerText = err.message;
-        }
-    }
-
-    async function logout() {
-        await signOut(auth);
-        localStorage.clear();
-        showToast("Logout Successfully");
-        window.location.reload();
-    }
-
-    // Forgot password
-    document.getElementById("forgotPasswordLink")?.addEventListener("click", (e) => {
-        e.preventDefault();
-        document.getElementById("forgotPasswordForm").style.display = "block";
-    });
-    document.getElementById("sendResetBtn")?.addEventListener("click", async () => {
-        const email = document.getElementById("resetEmail").value.trim();
-        if (!email) { showToast("Enter your email address", true); return; }
-        try {
-            await sendPasswordResetEmail(auth, email);
-            showToast("Password reset email sent!");
-            document.getElementById("forgotPasswordForm").style.display = "none";
-            document.getElementById("resetEmail").value = "";
-        } catch (err) { showToast(err.message, true); }
-    });
-    document.getElementById("cancelResetBtn")?.addEventListener("click", () => {
-        document.getElementById("forgotPasswordForm").style.display = "none";
-        document.getElementById("resetEmail").value = "";
-    });
-
     // ---------- Stripe ----------
     async function initStripe() {
         try {
             const res = await fetch(`${API_BASE}/stripe-key`);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
-            if (data.publishableKey && data.publishableKey.startsWith("pk_")) {
+            if (data.publishableKey) {
                 stripe = Stripe(data.publishableKey);
                 const elements = stripe.elements();
                 card = elements.create("card", { style: { base: { color: "#fff", fontSize: "16px" } } });
@@ -583,12 +416,10 @@
                     displayError.textContent = event.error ? event.error.message : "";
                 });
                 console.log("✅ Stripe initialized");
-            } else {
-                throw new Error("Invalid publishable key");
             }
         } catch (err) {
             console.error("Stripe init failed", err);
-            showToast("Payment system unavailable: " + err.message, true);
+            showToast("Payment system unavailable", true);
         }
     }
 
@@ -636,7 +467,12 @@
             else if (pendingPlan.plan === "15days") expiry.setDate(expiry.getDate() + 15);
             else if (pendingPlan.plan === "monthly") expiry.setMonth(expiry.getMonth() + 1);
             subscription.expiry = expiry.toISOString();
-            saveUserData();
+            // Update Firestore credits directly via backend? The backend already adds credits in payment intent metadata? Actually we need to add credits in Firestore after payment success.
+            // For simplicity, we will update frontend state and also call an API to add credits (or the backend already does it via webhook). Here we'll just increment locally and sync later.
+            // But to ensure persistence, we can call another endpoint or just rely on Firestore sync. Let's directly update Firestore.
+            const userRef = doc(db, "users", currentUser.uid);
+            await updateDoc(userRef, { credits: increment(pendingPlan.creditsAmt) });
+            await syncCreditsFromFirestore();
             updateUI();
             showToast(`Payment successful! +${pendingPlan.creditsAmt} credits added.`);
             document.getElementById("paymentModal").classList.remove("active");
@@ -646,7 +482,135 @@
         }
     }
 
-    // ---------- AI calls ----------
+    // ---------- UI helpers ----------
+    function updateUI() {
+        document.getElementById("creditDisplay").innerText = credits;
+        if (document.getElementById("dashCredits")) document.getElementById("dashCredits").innerText = credits;
+        if (document.getElementById("dashCount")) document.getElementById("dashCount").innerText = gallery.length;
+        if (document.getElementById("dashTotalGen")) document.getElementById("dashTotalGen").innerText = totalGenerations;
+        if (document.getElementById("subPlanText")) document.getElementById("subPlanText").innerText = subscription.plan === "free" ? "Free tier" : `${subscription.plan} plan`;
+        if (document.getElementById("subExpiry")) document.getElementById("subExpiry").innerText = subscription.expiry ? new Date(subscription.expiry).toLocaleDateString() : "—";
+        const lastPreviewImg = document.getElementById("lastPreviewImg");
+        if (lastPreviewImg) {
+            if (gallery.length && gallery[0]) lastPreviewImg.src = gallery[0];
+            else if (currentGenImage) lastPreviewImg.src = currentGenImage;
+            else lastPreviewImg.src = "";
+        }
+        if (document.getElementById("lastPreviewText")) document.getElementById("lastPreviewText").innerText = (gallery.length || currentGenImage) ? "Preview" : "No preview";
+        setDailyTimer();
+    }
+
+    function setDailyTimer() {
+        const dailyBtn = document.getElementById("dailyRewardBtn");
+        if (!dailyBtn) return;
+        let timerSpan = document.getElementById("dailyTimer");
+        if (!timerSpan) {
+            timerSpan = document.createElement("span");
+            timerSpan.id = "dailyTimer";
+            dailyBtn.appendChild(timerSpan);
+        }
+        if (lastDaily && (Date.now() - new Date(lastDaily).getTime()) < 86400000) {
+            const hoursLeft = Math.ceil((86400000 - (Date.now() - new Date(lastDaily).getTime())) / 3600000);
+            timerSpan.innerText = `(${hoursLeft}h left)`;
+            dailyBtn.style.opacity = "0.6";
+            dailyBtn.style.pointerEvents = "none";
+        } else {
+            timerSpan.innerText = "";
+            dailyBtn.style.opacity = "1";
+            dailyBtn.style.pointerEvents = "auto";
+        }
+    }
+
+    function updateNavbarAfterLogin(user) {
+        const avatarDiv = document.getElementById("userAvatarBtn");
+        if (!avatarDiv) return;
+        if (user && user.photoURL) avatarDiv.innerHTML = `<img src="${user.photoURL}" class="avatar">`;
+        else if (user) avatarDiv.innerHTML = `<i class="fas fa-user-check"></i>`;
+        else avatarDiv.innerHTML = `<i class="fas fa-user-astronaut"></i>`;
+    }
+
+    // ---------- Auth functions ----------
+    async function signupWithEmail() {
+        const first = document.getElementById("signupFirst").value.trim();
+        const last = document.getElementById("signupLast").value.trim();
+        const email = document.getElementById("signupEmail").value.trim();
+        const password = document.getElementById("signupPassword").value;
+        const confirm = document.getElementById("signupConfirm").value;
+        if (!first || !last || !email || !password) { showToast("Please fill all fields", true); return; }
+        if (password !== confirm) { showToast("Passwords do not match", true); return; }
+        try {
+            const userCred = await createUserWithEmailAndPassword(auth, email, password);
+            await updateProfile(userCred.user, { displayName: `${first} ${last}` });
+            const userRef = doc(db, "users", userCred.user.uid);
+            await setDoc(userRef, {
+                firstName: first,
+                lastName: last,
+                email: email,
+                uid: userCred.user.uid,
+                photoURL: "",
+                credits: 20,
+                createdAt: serverTimestamp()
+            });
+            showToast("Signup Successful ✅");
+            closeAuthModal();
+        } catch (err) { showToast(err.message, true); }
+    }
+
+    async function loginWithEmail() {
+        const email = document.getElementById("loginEmail").value.trim();
+        const password = document.getElementById("loginPassword").value;
+        if (!email || !password) { showToast("Email and password required", true); return; }
+        try {
+            await signInWithEmailAndPassword(auth, email, password);
+            showToast("Login Successful ✅");
+            closeAuthModal();
+        } catch (err) { showToast(err.message, true); }
+    }
+
+    async function loginWithGoogle() {
+        const provider = new GoogleAuthProvider();
+        try {
+            await signInWithPopup(auth, provider);
+            showToast("Google Login Successful ✅");
+            closeAuthModal();
+        } catch (err) {
+            if (err.code === "auth/operation-not-allowed") {
+                showToast("Google Sign-In not enabled in Firebase Console.", true);
+            } else {
+                showToast(err.message, true);
+            }
+            document.getElementById("googleErrorMsg").innerText = err.message;
+        }
+    }
+
+    async function logout() {
+        await signOut(auth);
+        localStorage.clear();
+        showToast("Logout Successfully");
+        window.location.reload();
+    }
+
+    // Forgot password
+    document.getElementById("forgotPasswordLink")?.addEventListener("click", (e) => {
+        e.preventDefault();
+        document.getElementById("forgotPasswordForm").style.display = "block";
+    });
+    document.getElementById("sendResetBtn")?.addEventListener("click", async () => {
+        const email = document.getElementById("resetEmail").value.trim();
+        if (!email) { showToast("Enter your email address", true); return; }
+        try {
+            await sendPasswordResetEmail(auth, email);
+            showToast("Password reset email sent!");
+            document.getElementById("forgotPasswordForm").style.display = "none";
+            document.getElementById("resetEmail").value = "";
+        } catch (err) { showToast(err.message, true); }
+    });
+    document.getElementById("cancelResetBtn")?.addEventListener("click", () => {
+        document.getElementById("forgotPasswordForm").style.display = "none";
+        document.getElementById("resetEmail").value = "";
+    });
+
+    // ---------- AI API calls ----------
     async function fetchWithAuth(url, options = {}) {
         if (!idToken) throw new Error("No auth token");
         const headers = { ...options.headers, "Authorization": `Bearer ${idToken}` };
@@ -678,7 +642,9 @@
             document.getElementById("genImage").src = currentGenImage;
             credits--;
             totalGenerations++;
-            saveUserData();
+            // Update Firestore credits
+            const userRef = doc(db, "users", currentUser.uid);
+            await updateDoc(userRef, { credits: increment(-1) });
             updateUI();
             document.getElementById("genLoader").style.display = "none";
             document.getElementById("genResult").style.display = "block";
@@ -707,7 +673,8 @@
             currentEditImg = data.imageUrl;
             document.getElementById("editResultImg").src = currentEditImg;
             credits -= 2;
-            saveUserData();
+            const userRef = doc(db, "users", currentUser.uid);
+            await updateDoc(userRef, { credits: increment(-2) });
             updateUI();
             document.getElementById("editLoader").style.display = "none";
             document.getElementById("editResult").style.display = "block";
@@ -732,36 +699,63 @@
         const img = isEdited ? currentEditImg : currentGenImage;
         if (!img) { showToast("No image to save", true); return; }
         gallery.unshift(img);
-        saveUserData();
+        localStorage.setItem(`gallery_${currentUser.uid}`, JSON.stringify(gallery));
         renderGallery();
         showToast("Saved to gallery");
     }
 
-    // ---------- Auth state ----------
+    function renderGallery() {
+        const container = document.getElementById("galleryContainer");
+        if (!container) return;
+        if (!gallery.length) {
+            container.innerHTML = "<p style='text-align:center'>No saved images</p>";
+            return;
+        }
+        container.innerHTML = "";
+        gallery.forEach(imgUrl => {
+            const div = document.createElement("div");
+            div.className = "gallery-card";
+            div.onclick = () => window.open(imgUrl);
+            div.innerHTML = `<img src="${imgUrl}"><div style="padding:0.5rem;"><button class="btn-secondary" onclick="event.stopPropagation(); downloadUrl('${imgUrl}')">Download</button></div>`;
+            container.appendChild(div);
+        });
+    }
+
+    function downloadUrl(url) {
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `ai_image_${Date.now()}.png`;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => a.remove(), 100);
+    }
+
+    // ---------- Auth state listener ----------
     onAuthStateChanged(auth, async (user) => {
         currentUser = user;
         if (user) {
             idToken = await user.getIdToken();
-            await saveUserToFirestore(user);
-            // Also sync credits from Firestore to frontend
-            const userDoc = await getDoc(doc(db, "users", user.uid));
-            if (userDoc.exists() && userDoc.data().credits !== undefined) {
-                credits = userDoc.data().credits;
-                saveUserData();
-                updateUI();
-            }
+            await loadUserFromFirestore(user);
+            // Load gallery from localStorage
+            const savedGallery = localStorage.getItem(`gallery_${user.uid}`);
+            if (savedGallery) gallery = JSON.parse(savedGallery);
+            else gallery = [];
+            totalGenerations = parseInt(localStorage.getItem(`total_generations_${user.uid}`) || "0");
             updateNavbarAfterLogin(user);
-            loadUserData();
+            renderGallery();
+            updateUI();
             closeAuthModal();
         } else {
             idToken = null;
             updateNavbarAfterLogin(null);
-            loadUserData();
+            gallery = [];
+            credits = 0;
+            updateUI();
             openAuthModal();
         }
     });
 
-    // ---------- UI event listeners ----------
+    // ---------- UI listeners ----------
     function openAuthModal() { document.getElementById("authModal").classList.add("active"); }
     function closeAuthModal() { document.getElementById("authModal").classList.remove("active"); }
 
@@ -868,7 +862,6 @@
             });
         }
 
-        loadUserData();
         initStripe();
     });
 </script>
