@@ -7,7 +7,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
-        /* Your existing CSS – exactly the same as before; no changes needed for style */
+        /* Your existing CSS – exactly the same as before */
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Inter', sans-serif;
@@ -150,8 +150,7 @@
 </head>
 <body>
 <div style="max-width: 1300px; margin: 0 auto;">
-    <!-- Navbar, Tabs, Generate/Edit/Gallery/Dashboard – all your existing HTML goes here unchanged -->
-    <!-- I'll put only the necessary content to be compact; you can reuse your full HTML -->
+    <!-- Navbar -->
     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; margin-bottom: 2rem;">
         <div style="display: flex; align-items: center; gap: 12px;">
             <div style="width: 44px; height: 44px; background: linear-gradient(135deg, #3b82f6, #a855f7); border-radius: 18px; display: flex; align-items: center; justify-content: center;"><i class="fas fa-brain"></i></div>
@@ -164,6 +163,7 @@
         </div>
     </div>
 
+    <!-- Tabs -->
     <div class="tabs">
         <button class="tab active" data-tab="generate">🎨 Generate</button>
         <button class="tab" data-tab="edit">✏️ Edit / Face</button>
@@ -171,6 +171,7 @@
         <button class="tab" data-tab="dashboard">📊 Dashboard</button>
     </div>
 
+    <!-- Generate Tab -->
     <div id="generateTab" class="tab-pane">
         <div class="glass-card" style="padding: 1.8rem;"><h3>✨ Text‑to‑Image (Flux Dev)</h3>
             <textarea id="genPrompt" rows="3" class="premium-textarea" placeholder="A warrior woman with glowing eyes, fantasy armor, 8k, cinematic"></textarea>
@@ -189,6 +190,7 @@
         <div id="genResult" style="display:none; text-align:center;"><img id="genImage" class="result-img"><br><button id="downloadGenBtn" class="btn-secondary">Download</button> <button id="saveGenBtn" class="btn-secondary">Save to gallery</button></div>
     </div>
 
+    <!-- Edit Tab -->
     <div id="editTab" class="tab-pane" style="display:none;">
         <div class="glass-card" style="padding:1.8rem;"><h3>🖌️ Face‑preserving editor</h3>
             <div id="uploadZone" class="upload-zone"><i class="fas fa-cloud-upload-alt"></i><p>Click or drag image here</p><input type="file" id="editUpload" accept="image/*" style="display:none;"></div>
@@ -200,10 +202,12 @@
         <div id="editResult" style="display:none; text-align:center;"><img id="editResultImg" class="result-img"><br><button id="downloadEditBtn" class="btn-secondary">Download</button> <button id="saveEditBtn" class="btn-secondary">Save to gallery</button></div>
     </div>
 
+    <!-- Gallery Tab -->
     <div id="galleryTab" class="tab-pane" style="display:none;">
         <div class="glass-card" style="padding:1.8rem;"><h3>🖼️ Your gallery</h3><div id="galleryContainer" class="gallery-grid"><p>No saved images</p></div></div>
     </div>
 
+    <!-- Dashboard Tab -->
     <div id="dashboardTab" class="tab-pane" style="display:none;">
         <div class="glass-card" style="padding:1.8rem;">
             <h3>📈 Dashboard</h3>
@@ -294,7 +298,7 @@
     import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut, updateProfile, sendPasswordResetEmail } from "firebase/auth";
     import { getFirestore, doc, getDoc, setDoc, updateDoc, increment, serverTimestamp } from "firebase/firestore";
 
-    // ✅ Because frontend and backend are served from the same origin, API_BASE is relative
+    // API_BASE is relative – works because backend serves frontend
     const API_BASE = "/api";
 
     const firebaseConfig = {
@@ -333,6 +337,16 @@
         document.body.appendChild(toast);
         setTimeout(() => toast.remove(), 3000);
     }
+
+    // Make downloadUrl globally available for gallery buttons
+    window.downloadUrl = function(url) {
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `ai_image_${Date.now()}.png`;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => a.remove(), 100);
+    };
 
     async function syncCreditsFromFirestore() {
         if (!currentUser) return;
@@ -606,15 +620,6 @@
         });
     }
 
-    function downloadUrl(url) {
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `ai_image_${Date.now()}.png`;
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(() => a.remove(), 100);
-    }
-
     function updateNavbarAfterLogin(user) {
         const avatarDiv = document.getElementById("userAvatarBtn");
         if (!avatarDiv) return;
@@ -678,6 +683,7 @@
         window.location.reload();
     }
 
+    // Event listeners and modals
     document.getElementById("forgotPasswordLink")?.addEventListener("click", (e) => {
         e.preventDefault();
         document.getElementById("forgotPasswordForm").style.display = "block";
@@ -759,8 +765,8 @@
         document.getElementById("editBtn")?.addEventListener("click", editImage);
         document.getElementById("saveGenBtn")?.addEventListener("click", () => saveCurrentToGallery(false));
         document.getElementById("saveEditBtn")?.addEventListener("click", () => saveCurrentToGallery(true));
-        document.getElementById("downloadGenBtn")?.addEventListener("click", () => currentGenImage && downloadUrl(currentGenImage));
-        document.getElementById("downloadEditBtn")?.addEventListener("click", () => currentEditImg && downloadUrl(currentEditImg));
+        document.getElementById("downloadGenBtn")?.addEventListener("click", () => currentGenImage && window.downloadUrl(currentGenImage));
+        document.getElementById("downloadEditBtn")?.addEventListener("click", () => currentEditImg && window.downloadUrl(currentEditImg));
         document.getElementById("dailyRewardBtn")?.addEventListener("click", claimDaily);
 
         document.querySelectorAll(".subscribeBtn").forEach(btn => {
