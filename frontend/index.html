@@ -7,7 +7,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
-        /* Your existing CSS – no changes needed, keep as is */
+        /* All your CSS – keep exactly as before (CSS unchanged) */
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Inter', sans-serif;
@@ -163,7 +163,7 @@
         </div>
     </div>
 
-    <!-- Tabs (unchanged) -->
+    <!-- Tabs -->
     <div class="tabs">
         <button class="tab active" data-tab="generate">🎨 Generate</button>
         <button class="tab" data-tab="edit">✏️ Edit / Face</button>
@@ -191,7 +191,7 @@
         <div id="genResult" style="display:none; text-align:center;"><img id="genImage" class="result-img"><br><button id="downloadGenBtn" class="btn-secondary">Download</button> <button id="saveGenBtn" class="btn-secondary">Save to gallery</button></div>
     </div>
 
-    <!-- Edit Tab (unchanged) -->
+    <!-- Edit Tab -->
     <div id="editTab" class="tab-pane" style="display:none;">
         <div class="glass-card" style="padding:1.8rem;">
             <h3>🖌️ Face‑preserving editor</h3>
@@ -204,12 +204,12 @@
         <div id="editResult" style="display:none; text-align:center;"><img id="editResultImg" class="result-img"><br><button id="downloadEditBtn" class="btn-secondary">Download</button> <button id="saveEditBtn" class="btn-secondary">Save to gallery</button></div>
     </div>
 
-    <!-- Gallery Tab (unchanged) -->
+    <!-- Gallery Tab -->
     <div id="galleryTab" class="tab-pane" style="display:none;">
         <div class="glass-card" style="padding:1.8rem;"><h3>🖼️ Your gallery</h3><div id="galleryContainer" class="gallery-grid"><p>No saved images</p></div></div>
     </div>
 
-    <!-- Dashboard Tab (unchanged) -->
+    <!-- Dashboard Tab -->
     <div id="dashboardTab" class="tab-pane" style="display:none;">
         <div class="glass-card" style="padding:1.8rem;">
             <h3>📈 Dashboard</h3>
@@ -230,7 +230,7 @@
     </div>
 </div>
 
-<!-- Auth Modal (unchanged) -->
+<!-- Auth Modal -->
 <div id="authModal" class="modal-overlay">
     <div class="modal-content">
         <div style="display: flex; justify-content: space-between; align-items: center;"><h3><i class="fas fa-key"></i> Access Account</h3><button id="closeAuthBtn" style="background:none; border:none; color:white; font-size:1.8rem;">&times;</button></div>
@@ -265,7 +265,7 @@
     </div>
 </div>
 
-<!-- Payment Modal (unchanged) -->
+<!-- Payment Modal -->
 <div id="paymentModal" class="modal-overlay">
     <div class="modal-content" style="text-align: left;">
         <h3>💳 Secure Checkout</h3>
@@ -300,8 +300,8 @@
     import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut, updateProfile, sendPasswordResetEmail } from "firebase/auth";
     import { getFirestore, doc, getDoc, setDoc, updateDoc, increment, serverTimestamp } from "firebase/firestore";
 
-    // 👇 YOUR BACKEND URL (must be correct)
-    const API_BASE = "https://ai-studio-pro-lquw.onrender.com/api";
+    // ✅ BACKEND URL (same as the host – relative path works because both frontend and backend are served from the same origin)
+    const API_BASE = "/api";
 
     const firebaseConfig = {
         apiKey: "AIzaSyAe8-hjKY0OXgiMsyA2nf4Qup-KCrWKOw8",
@@ -332,7 +332,6 @@
     let clientSecret = null;
     let pendingPlan = null;
 
-    // ---------- Toast ----------
     function showToast(msg, isErr = false) {
         const toast = document.createElement("div");
         toast.className = "toast";
@@ -341,7 +340,6 @@
         setTimeout(() => toast.remove(), 3000);
     }
 
-    // ---------- Firestore sync (credits persist across logouts) ----------
     async function syncCreditsFromFirestore() {
         if (!currentUser) return;
         const userRef = doc(db, "users", currentUser.uid);
@@ -365,7 +363,6 @@
         updateUI();
     }
 
-    // ---------- Daily reward (calls backend) ----------
     async function claimDaily() {
         if (!currentUser) {
             showToast("Please sign in first", true);
@@ -383,7 +380,6 @@
                 lastDaily = new Date().toDateString();
                 updateUI();
                 showToast(data.message);
-                // ensure Firestore is in sync
                 await syncCreditsFromFirestore();
             } else {
                 showToast(data.error, true);
@@ -394,7 +390,6 @@
         }
     }
 
-    // ---------- Stripe ----------
     async function initStripe() {
         try {
             const res = await fetch(`${API_BASE}/stripe-key`);
@@ -460,7 +455,6 @@
             else if (pendingPlan.plan === "15days") expiry.setDate(expiry.getDate() + 15);
             else if (pendingPlan.plan === "monthly") expiry.setMonth(expiry.getMonth() + 1);
             subscription.expiry = expiry.toISOString();
-            // Update Firestore
             const userRef = doc(db, "users", currentUser.uid);
             await updateDoc(userRef, { credits: increment(pendingPlan.creditsAmt) });
             await syncCreditsFromFirestore();
@@ -473,7 +467,6 @@
         }
     }
 
-    // ---------- AI and gallery helpers (same as before, but with Firestore updates) ----------
     async function generate() {
         if (!currentUser) { showToast("Please sign in first", true); return; }
         const prompt = document.getElementById("genPrompt").value.trim();
@@ -691,7 +684,6 @@
         window.location.reload();
     }
 
-    // Forgot password
     document.getElementById("forgotPasswordLink")?.addEventListener("click", (e) => {
         e.preventDefault();
         document.getElementById("forgotPasswordForm").style.display = "block";
@@ -711,7 +703,6 @@
         document.getElementById("resetEmail").value = "";
     });
 
-    // Auth state
     onAuthStateChanged(auth, async (user) => {
         currentUser = user;
         if (user) {
@@ -729,7 +720,6 @@
         }
     });
 
-    // UI listeners
     function openAuthModal() { document.getElementById("authModal").classList.add("active"); }
     function closeAuthModal() { document.getElementById("authModal").classList.remove("active"); }
 
