@@ -66,6 +66,20 @@ async function ensureAuthenticated(req, res, next) {
     }
 }
 
+// ========== Helper to ensure user document exists ==========
+async function ensureUserDocument(userId) {
+    const userRef = db.collection("users").doc(userId);
+    const doc = await userRef.get();
+    if (!doc.exists) {
+        await userRef.set({
+            credits: 20,
+            createdAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+        console.log(`Created new user document for ${userId} with 20 credits`);
+    }
+    return userRef;
+}
+
 // ========== STRIPE ROUTES ==========
 app.get("/api/stripe-key", (req, res) => {
     res.json({ publishableKey: STRIPE_PUBLISHABLE_KEY });
@@ -88,7 +102,7 @@ app.post("/api/create-payment-intent", ensureAuthenticated, async (req, res) => 
     }
 });
 
-// ========== PAYMENT SUCCESS – UPDATE FIRESTORE (FIXED) ==========
+// ========== PAYMENT SUCCESS – UPDATE FIRESTORE ==========
 app.post("/api/payment-success", ensureAuthenticated, async (req, res) => {
     console.log("🔥 Payment success endpoint hit");
     console.log("Request body:", req.body);
@@ -99,6 +113,8 @@ app.post("/api/payment-success", ensureAuthenticated, async (req, res) => {
             return res.status(400).json({ error: "Missing userId or invalid credits" });
         }
 
+        // Ensure user document exists
+        await ensureUserDocument(userId);
         const userRef = db.collection("users").doc(userId);
         const updateData = {
             credits: admin.firestore.FieldValue.increment(parseInt(credits))
@@ -136,7 +152,24 @@ app.post("/api/payment-success", ensureAuthenticated, async (req, res) => {
     }
 });
 
-// ========== DAILY REWARD – FIXED (persists in Firestore) ==========
+// ========== GET USER CREDITS ==========
+app.get("/api/user/credits/:userId", ensureAuthenticated, async (req, res) => {
+    try {
+        const { userId } = req.params;
+        if (req.user.uid !== userId) {
+            return res.status(403).json({ error: "Unauthorized" });
+        }
+        await ensureUserDocument(userId);
+        const userDoc = await db.collection("users").doc(userId).get();
+        const credits = userDoc.data().credits || 20;
+        res.json({ credits });
+    } catch (error) {
+        console.error("Error fetching credits:", error);
+        res.status(500).json({ error: "Failed to fetch credits" });
+    }
+});
+
+// ========== DAILY REWARD ==========
 app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
     try {
         const { userId } = req.body;
@@ -144,6 +177,8 @@ app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
             return res.status(400).json({ error: "Missing userId" });
         }
 
+        // Ensure user document exists
+        await ensureUserDocument(userId);
         const userRef = db.collection("users").doc(userId);
         const userDoc = await userRef.get();
 
