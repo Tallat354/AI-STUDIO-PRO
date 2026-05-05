@@ -88,7 +88,7 @@ app.post("/api/create-payment-intent", ensureAuthenticated, async (req, res) => 
     }
 });
 
-// ========== PAYMENT SUCCESS – UPDATE FIRESTORE (document existence handled) ==========
+// ========== PAYMENT SUCCESS – UPDATE FIRESTORE (safe) ==========
 app.post("/api/payment-success", ensureAuthenticated, async (req, res) => {
     console.log("🔥 Payment success endpoint hit");
     console.log("Request body:", req.body);
@@ -99,18 +99,21 @@ app.post("/api/payment-success", ensureAuthenticated, async (req, res) => {
         if (!credits || isNaN(credits)) return res.status(400).json({ error: "Invalid credits amount" });
 
         const userRef = db.collection("users").doc(userId);
-        const userDoc = await userRef.get();
-        if (!userDoc.exists) {
-            // First time user – create document with initial 20 credits
-            await userRef.set({ credits: 20, createdAt: admin.firestore.FieldValue.serverTimestamp() });
-        }
+        // Use a transaction to ensure document exists before update
+        await db.runTransaction(async (transaction) => {
+            const doc = await transaction.get(userRef);
+            if (!doc.exists) {
+                // Create document with initial 20 credits
+                transaction.set(userRef, { credits: 20, createdAt: admin.firestore.FieldValue.serverTimestamp() });
+            }
+            // Now increment credits
+            transaction.update(userRef, {
+                credits: admin.firestore.FieldValue.increment(parseInt(credits)),
+                lastUpdated: admin.firestore.FieldValue.serverTimestamp()
+            });
+        });
 
-        // Now increment credits
-        await userRef.set({
-            credits: admin.firestore.FieldValue.increment(parseInt(credits))
-        }, { merge: true });
-
-        // Plan subscription update
+        // Update subscription plan if provided
         if (plan) {
             let days = 0, planName = "";
             switch (plan) {
@@ -124,8 +127,7 @@ app.post("/api/payment-success", ensureAuthenticated, async (req, res) => {
                 expiresAt.setDate(expiresAt.getDate() + days);
                 await userRef.set({
                     subscriptionPlan: planName,
-                    subscriptionExpiry: expiresAt,
-                    lastUpdated: admin.firestore.FieldValue.serverTimestamp()
+                    subscriptionExpiry: expiresAt
                 }, { merge: true });
             }
         }
@@ -140,7 +142,7 @@ app.post("/api/payment-success", ensureAuthenticated, async (req, res) => {
     }
 });
 
-// ========== DAILY REWARD – FIXED (ensures document exists) ==========
+// ========== DAILY REWARD – FIXED (uses transaction) ==========
 app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
     console.log("🔥 Daily reward endpoint hit");
     console.log("Request body:", req.body);
@@ -151,43 +153,54 @@ app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
         }
 
         const userRef = db.collection("users").doc(userId);
-        const userDoc = await userRef.get();
+        let newCredits = 0;
 
-        // Ensure the document exists before reading/writing
-        if (!userDoc.exists) {
-            await userRef.set({ credits: 20, createdAt: admin.firestore.FieldValue.serverTimestamp() });
-        }
+        await db.runTransaction(async (transaction) => {
+            const doc = await transaction.get(userRef);
+            const now = Date.now();
+            const lastClaim = doc.exists ? doc.data().lastDailyReward : null;
+            const oneDay = 24 * 60 * 60 * 1000;
 
-        const now = Date.now();
-        const lastClaim = userDoc.exists ? userDoc.data().lastDailyReward : null;
-        const oneDay = 24 * 60 * 60 * 1000;
+            if (lastClaim && (now - lastClaim) < oneDay) {
+                const hoursLeft = Math.ceil((oneDay - (now - lastClaim)) / (60 * 60 * 1000));
+                throw new Error(`Already claimed today! Next reward in ${hoursLeft} hours.`);
+            }
 
-        if (lastClaim && (now - lastClaim) < oneDay) {
-            const hoursLeft = Math.ceil((oneDay - (now - lastClaim)) / (60 * 60 * 1000));
-            return res.status(400).json({
-                error: `Already claimed today! Next reward in ${hoursLeft} hours.`,
-                alreadyClaimed: true
-            });
-        }
+            if (!doc.exists) {
+                // First time – create document with 20 credits
+                transaction.set(userRef, {
+                    credits: 20,
+                    lastDailyReward: now,
+                    createdAt: admin.firestore.FieldValue.serverTimestamp()
+                });
+                newCredits = 30; // 20 + 10
+            } else {
+                // Increment credits and update last claim time
+                transaction.update(userRef, {
+                    credits: admin.firestore.FieldValue.increment(10),
+                    lastDailyReward: now
+                });
+                newCredits = (doc.data().credits || 0) + 10;
+            }
+        });
 
-        // Increment credits and update last claim time
-        await userRef.set({
-            credits: admin.firestore.FieldValue.increment(10),
-            lastDailyReward: now
-        }, { merge: true });
+        // If transaction succeeded, fetch the final credits for response (optional)
+        const finalDoc = await userRef.get();
+        const finalCredits = finalDoc.data()?.credits || newCredits;
 
-        const updatedDoc = await userRef.get();
-        const newCredits = updatedDoc.data()?.credits || 0;
-
-        console.log(`✅ Daily reward claimed for ${userId}: +10 credits, total: ${newCredits}`);
+        console.log(`✅ Daily reward claimed for ${userId}: +10 credits, total: ${finalCredits}`);
         res.json({
             success: true,
             message: "+10 credits added!",
-            newCredits: newCredits
+            newCredits: finalCredits
         });
     } catch (error) {
-        console.error("❌ Daily reward error:", error);
-        res.status(500).json({ error: error.message, details: error.toString() });
+        console.error("❌ Daily reward error:", error.message);
+        // If error is from transaction (already claimed), send 400
+        if (error.message.includes("Already claimed")) {
+            return res.status(400).json({ error: error.message, alreadyClaimed: true });
+        }
+        res.status(500).json({ error: "Failed to claim daily reward", details: error.message });
     }
 });
 
