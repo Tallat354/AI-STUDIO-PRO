@@ -3,11 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>AI Studio Pro – Complete</title>
+    <title>AI Studio Pro – Complete Working</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
-        /* All CSS (unchanged) – keep your existing styles */
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Inter', sans-serif;
@@ -191,7 +190,7 @@
         <div id="genResult" style="display:none; text-align:center;"><img id="genImage" class="result-img"><br><button id="downloadGenBtn" class="btn-secondary">Download</button> <button id="saveGenBtn" class="btn-secondary">Save to gallery</button></div>
     </div>
 
-    <!-- Edit Tab (only face edit) -->
+    <!-- Edit Tab -->
     <div id="editTab" class="tab-pane" style="display:none;">
         <div class="glass-card" style="padding:1.8rem;">
             <h3>🖌️ Face‑preserving editor</h3>
@@ -265,7 +264,7 @@
     </div>
 </div>
 
-<!-- Payment Modal (Stripe) -->
+<!-- Payment Modal (Stripe Elements) -->
 <div id="paymentModal" class="modal-overlay">
     <div class="modal-content" style="text-align: left;">
         <h3>💳 Secure Checkout</h3>
@@ -300,7 +299,8 @@
     import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut, updateProfile, sendPasswordResetEmail } from "firebase/auth";
     import { getFirestore, doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
 
-    const API_BASE = "http://localhost:3000/api";
+    // ✅ IMPORTANT: Set this to your backend URL (Render deployment)
+    const API_BASE = "https://ai-studio-pro-lquw.onrender.com/api";   // Change to your Render backend URL
 
     const firebaseConfig = {
         apiKey: "AIzaSyAe8-hjKY0OXgiMsyA2nf4Qup-KCrWKOw8",
@@ -352,6 +352,11 @@
                     createdAt: serverTimestamp()
                 });
                 console.log("✅ User saved to Firestore");
+            } else {
+                // Ensure credits field exists
+                if (snap.data().credits === undefined) {
+                    await userRef.update({ credits: 20 });
+                }
             }
             return true;
         } catch (err) {
@@ -368,42 +373,12 @@
         else avatarDiv.innerHTML = `<i class="fas fa-user-astronaut"></i>`;
     }
 
-    async function fetchCredits() {
-        if (!currentUser) return;
-        const token = await currentUser.getIdToken();
-        const res = await fetch(`${API_BASE}/user/credits`, {
-            headers: { "Authorization": `Bearer ${token}` }
-        });
-        const data = await res.json();
-        credits = data.credits;
-        updateUI();
-    }
-
-    async function claimDaily() {
-        if (!currentUser) { showToast("Please sign in first", true); return; }
-        const token = await currentUser.getIdToken();
-        try {
-            const res = await fetch(`${API_BASE}/daily-reward`, {
-                method: "POST",
-                headers: { "Authorization": `Bearer ${token}` }
-            });
-            const data = await res.json();
-            if (data.success) {
-                credits = data.credits;
-                updateUI();
-                showToast("🎉 +10 credits! Daily reward claimed.");
-            } else {
-                showToast(data.error || "Already claimed today", true);
-            }
-        } catch (err) {
-            showToast("Failed to claim daily reward", true);
-        }
-    }
-
+    // ---------- Data persistence (localStorage) ----------
     function loadUserData() {
         if (!currentUser) {
             credits = 20; gallery = []; totalGenerations = 0;
-            subscription = { plan: "free", expiry: null }; lastDaily = null;
+            subscription = { plan: "free", expiry: null };
+            lastDaily = null;
         } else {
             credits = parseInt(localStorage.getItem(`credits_${currentUser.uid}`) || "20");
             gallery = JSON.parse(localStorage.getItem(`gallery_${currentUser.uid}`) || "[]");
@@ -490,6 +465,34 @@
         setTimeout(() => a.remove(), 100);
     }
 
+    // ---------- DAILY REWARD (FIXED) ----------
+    async function claimDaily() {
+        if (!currentUser) {
+            showToast("Please sign in first", true);
+            return;
+        }
+        const token = await currentUser.getIdToken();
+        try {
+            const res = await fetch(`${API_BASE}/daily-reward`, {
+                method: "POST",
+                headers: { "Authorization": `Bearer ${token}` }
+            });
+            const data = await res.json();
+            if (res.ok) {
+                credits = data.credits;
+                // Also update local storage and sync
+                saveUserData();
+                updateUI();
+                showToast(data.message);
+            } else {
+                showToast(data.error, true);
+            }
+        } catch (err) {
+            console.error("Daily reward error:", err);
+            showToast("Failed to claim daily reward", true);
+        }
+    }
+
     // ---------- Auth functions ----------
     async function signupWithEmail() {
         const first = document.getElementById("signupFirst").value.trim();
@@ -513,7 +516,8 @@
         const password = document.getElementById("loginPassword").value;
         if (!email || !password) { showToast("Email and password required", true); return; }
         try {
-            await signInWithEmailAndPassword(auth, email, password);
+            const userCred = await signInWithEmailAndPassword(auth, email, password);
+            await saveUserToFirestore(userCred.user);
             showToast("Login Successful ✅");
             closeAuthModal();
         } catch (err) { showToast(err.message, true); }
@@ -522,7 +526,8 @@
     async function loginWithGoogle() {
         const provider = new GoogleAuthProvider();
         try {
-            await signInWithPopup(auth, provider);
+            const result = await signInWithPopup(auth, provider);
+            await saveUserToFirestore(result.user);
             showToast("Google Login Successful ✅");
             closeAuthModal();
         } catch (err) {
@@ -538,10 +543,11 @@
     async function logout() {
         await signOut(auth);
         localStorage.clear();
+        showToast("Logout Successfully");
         window.location.reload();
     }
 
-    // Forgot password handlers
+    // Forgot password
     document.getElementById("forgotPasswordLink")?.addEventListener("click", (e) => {
         e.preventDefault();
         document.getElementById("forgotPasswordForm").style.display = "block";
@@ -569,7 +575,7 @@
             const data = await res.json();
             if (data.publishableKey && data.publishableKey.startsWith("pk_")) {
                 stripe = Stripe(data.publishableKey);
-                elements = stripe.elements();
+                const elements = stripe.elements();
                 card = elements.create("card", { style: { base: { color: "#fff", fontSize: "16px" } } });
                 card.mount("#card-element");
                 card.addEventListener("change", (event) => {
@@ -577,6 +583,8 @@
                     displayError.textContent = event.error ? event.error.message : "";
                 });
                 console.log("✅ Stripe initialized");
+            } else {
+                throw new Error("Invalid publishable key");
             }
         } catch (err) {
             console.error("Stripe init failed", err);
@@ -638,7 +646,7 @@
         }
     }
 
-    // ---------- AI API calls ----------
+    // ---------- AI calls ----------
     async function fetchWithAuth(url, options = {}) {
         if (!idToken) throw new Error("No auth token");
         const headers = { ...options.headers, "Authorization": `Bearer ${idToken}` };
@@ -735,10 +743,15 @@
         if (user) {
             idToken = await user.getIdToken();
             await saveUserToFirestore(user);
+            // Also sync credits from Firestore to frontend
+            const userDoc = await getDoc(doc(db, "users", user.uid));
+            if (userDoc.exists() && userDoc.data().credits !== undefined) {
+                credits = userDoc.data().credits;
+                saveUserData();
+                updateUI();
+            }
             updateNavbarAfterLogin(user);
-            // Load credits from Firestore via API
-            await fetchCredits();
-            loadUserData(); // loads gallery etc from localStorage
+            loadUserData();
             closeAuthModal();
         } else {
             idToken = null;
@@ -748,7 +761,7 @@
         }
     });
 
-    // ---------- Event listeners ----------
+    // ---------- UI event listeners ----------
     function openAuthModal() { document.getElementById("authModal").classList.add("active"); }
     function closeAuthModal() { document.getElementById("authModal").classList.remove("active"); }
 
@@ -800,7 +813,6 @@
         document.getElementById("downloadEditBtn")?.addEventListener("click", () => currentEditImg && downloadUrl(currentEditImg));
         document.getElementById("dailyRewardBtn")?.addEventListener("click", claimDaily);
 
-        // Subscription buttons
         document.querySelectorAll(".subscribeBtn").forEach(btn => {
             btn.addEventListener("click", () => {
                 if (!currentUser) { showToast("Please sign in first", true); openAuthModal(); return; }
