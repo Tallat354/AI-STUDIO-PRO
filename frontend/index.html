@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>AI Studio Pro – Fixed Stripe</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        /* Your existing CSS – same as before, no changes */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: radial-gradient(circle at 10% 20%, #0a0c12, #03050b);
+            color: white;
+            min-height: 100vh;
+            padding: 1rem;
+        }
+        .glass-card { background: rgba(18,22,35,0.65); backdrop-filter: blur(14px); border-radius: 2rem; border: 1px solid rgba(72,187,255,0.2); transition: 0.25s; }
+        .btn-primary { background: linear-gradient(105deg, #3b82f6, #a855f7); border: none; padding: 12px 28px; border-radius: 40px; font-weight: 600; color: white; cursor: pointer; }
+        .btn-secondary { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.2); padding: 10px 24px; border-radius: 40px; font-weight: 500; cursor: pointer; color: white; }
+        .premium-input, .premium-textarea { background: #0f172a; border: 1px solid #2d3a5e; border-radius: 1.2rem; padding: 1rem; color: white; width: 100%; margin: 0.5rem 0; }
+        .upload-zone { border: 2px dashed #8b5cf6; border-radius: 1.5rem; padding: 2rem; text-align: center; cursor: pointer; background: rgba(15,23,42,0.4); }
+        .gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px,1fr)); gap: 1rem; }
+        .gallery-card { background: rgba(15,23,42,0.7); border-radius: 1rem; overflow: hidden; cursor: pointer; }
+        .gallery-card img { width: 100%; height: 180px; object-fit: cover; }
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); backdrop-filter: blur(12px); display: flex; align-items: center; justify-content: center; z-index: 2000; visibility: hidden; opacity: 0; transition: 0.2s; }
+        .modal-overlay.active { visibility: visible; opacity: 1; }
+        .modal-content { background: #0f172a; border-radius: 2rem; padding: 1.5rem; width: 460px; max-width: 90%; text-align: center; }
+        .toast { position: fixed; bottom: 20px; right: 20px; background: #1e293b; padding: 12px 24px; border-radius: 40px; border-left: 4px solid #8b5cf6; z-index: 9999; animation: slideIn 0.3s ease; }
+        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        .tabs { display: flex; gap: 0.8rem; margin-bottom: 2rem; flex-wrap: wrap; }
+        .tab { background: none; border: none; padding: 0.6rem 1.5rem; border-radius: 40px; color: #ccc; cursor: pointer; }
+        .tab.active { background: linear-gradient(135deg, #3b82f6, #8b5cf6); color: white; }
+        .loader { text-align: center; padding: 2rem; display: none; }
+        .spinner { width: 40px; height: 40px; border: 3px solid #334155; border-top-color: #8b5cf6; border-radius: 50%; animation: spin 1s infinite; margin: 0 auto; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .result-img { max-width: 100%; border-radius: 1.5rem; margin-top: 1rem; }
+        .avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; }
+        .error-text { color: #f87171; font-size: 0.8rem; margin-top: 0.5rem; text-align: center; }
+        .style-grid { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 1rem 0; }
+        .style-card { background: #0f172a; padding: 0.5rem 1rem; border-radius: 40px; cursor: pointer; border: 1px solid #2d3a5e; }
+        .style-card.active { background: linear-gradient(135deg, #3b82f6, #8b5cf6); border-color: transparent; }
+        .user-menu { position: fixed; top: 70px; right: 20px; background: #0f172a; border-radius: 1rem; padding: 1rem; min-width: 220px; z-index: 10000; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5); }
+    </style>
+</head>
+<body>
+<div style="max-width: 1300px; margin: 0 auto;">
+    <!-- Navbar -->
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; margin-bottom: 2rem;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="width: 44px; height: 44px; background: linear-gradient(135deg, #3b82f6, #a855f7); border-radius: 18px; display: flex; align-items: center; justify-content: center;"><i class="fas fa-brain"></i></div>
+            <h1 style="font-size: 1.8rem; background: linear-gradient(135deg,#a5f3fc,#c084fc); -webkit-background-clip: text; background-clip: text; color: transparent;">AI Studio Pro</h1>
+        </div>
+        <div style="display: flex; gap: 1rem; align-items: center;">
+            <div style="background:#0f172a; padding: 6px 18px; border-radius: 60px;">💎 <span id="creditDisplay">20</span> credits</div>
+            <div id="dailyRewardBtn" class="btn-secondary" style="display: flex; gap: 8px;"><i class="fas fa-gift"></i> Daily +10<span id="dailyTimer"></span></div>
+            <div id="userAvatarBtn" style="cursor:pointer; background:#2d3a5e; border-radius: 50%; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center;"><i class="fas fa-user-astronaut"></i></div>
+        </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+        <button class="tab active" data-tab="generate">🎨 Generate</button>
+        <button class="tab" data-tab="edit">✏️ Edit / Face</button>
+        <button class="tab" data-tab="gallery">🖼️ Gallery</button>
+        <button class="tab" data-tab="dashboard">📊 Dashboard</button>
+    </div>
+
+    <!-- Generate Tab -->
+    <div id="generateTab" class="tab-pane">
+        <div class="glass-card" style="padding: 1.8rem;">
+            <h3>✨ Text‑to‑Image (Flux Dev)</h3>
+            <textarea id="genPrompt" rows="3" class="premium-textarea" placeholder="A warrior woman with glowing eyes, fantasy armor, 8k, cinematic"></textarea>
+            <input id="negPrompt" class="premium-input" placeholder="Negative prompt (blurry, ugly)">
+            <div class="style-grid" id="styleGrid">
+                <div class="style-card active" data-style="realistic">Realistic</div>
+                <div class="style-card" data-style="anime">Anime</div>
+                <div class="style-card" data-style="cinematic">Cinematic</div>
+                <div class="style-card" data-style="cyberpunk">Cyberpunk</div>
+                <div class="style-card" data-style="fantasy">Fantasy</div>
+                <div class="style-card" data-style="portrait">Portrait</div>
+            </div>
+            <div><button id="genBtn" class="btn-primary">🚀 Generate (1 credit)</button> <button id="enhanceBtn" class="btn-secondary">✨ Enhance</button></div>
+        </div>
+        <div id="genLoader" class="loader"><div class="spinner"></div><p>Generating...</p></div>
+        <div id="genResult" style="display:none; text-align:center;"><img id="genImage" class="result-img"><br><button id="downloadGenBtn" class="btn-secondary">Download</button> <button id="saveGenBtn" class="btn-secondary">Save to gallery</button></div>
+    </div>
+
+    <!-- Edit Tab -->
+    <div id="editTab" class="tab-pane" style="display:none;">
+        <div class="glass-card" style="padding:1.8rem;">
+            <h3>🖌️ Face‑preserving editor</h3>
+            <div id="uploadZone" class="upload-zone"><i class="fas fa-cloud-upload-alt"></i><p>Click or drag image here</p><input type="file" id="editUpload" accept="image/*" style="display:none;"></div>
+            <div id="editPreview" style="margin:1rem 0;"></div>
+            <textarea id="editPrompt" rows="2" class="premium-textarea" placeholder="Describe edit (e.g., 'make her smile', 'change hair to curly')"></textarea>
+            <button id="editBtn" class="btn-primary">✏️ AI edit (2 credits)</button>
+        </div>
+        <div id="editLoader" class="loader"><div class="spinner"></div><p>Editing...</p></div>
+        <div id="editResult" style="display:none; text-align:center;"><img id="editResultImg" class="result-img"><br><button id="downloadEditBtn" class="btn-secondary">Download</button> <button id="saveEditBtn" class="btn-secondary">Save to gallery</button></div>
+    </div>
+
+    <!-- Gallery Tab -->
+    <div id="galleryTab" class="tab-pane" style="display:none;">
+        <div class="glass-card" style="padding:1.8rem;"><h3>🖼️ Your gallery</h3><div id="galleryContainer" class="gallery-grid"><p>No saved images</p></div></div>
+    </div>
+
+    <!-- Dashboard Tab -->
+    <div id="dashboardTab" class="tab-pane" style="display:none;">
+        <div class="glass-card" style="padding:1.8rem;">
+            <h3>📈 Dashboard</h3>
+            <div style="display:flex; gap:1rem; flex-wrap:wrap; margin:1rem 0;">
+                <div style="background:#0f172a; border-radius:1.5rem; padding:1rem; text-align:center; flex:1;"><div>💎 Credits</div><div style="font-size:2rem;" id="dashCredits">0</div></div>
+                <div style="background:#0f172a; border-radius:1.5rem; padding:1rem; text-align:center; flex:1;"><div>🖼️ Saved</div><div style="font-size:2rem;" id="dashCount">0</div></div>
+                <div style="background:#0f172a; border-radius:1.5rem; padding:1rem; text-align:center; flex:1;"><div>🎨 Generations</div><div style="font-size:2rem;" id="dashTotalGen">0</div></div>
+            </div>
+            <div style="background:#0f172a; border-radius:1rem; padding:1rem; margin-bottom:1rem;"><div>Plan: <strong id="subPlanText">Free tier</strong></div><div>Expires: <span id="subExpiry">—</span></div><button id="upgradePlanBtn" class="btn-secondary">Upgrade plan</button></div>
+            <div><h4>📷 Last preview</h4><img id="lastPreviewImg" style="max-width:150px; border-radius:12px;"><p id="lastPreviewText">No preview</p></div>
+            <h3 style="margin-top:1.5rem;">⚡ Subscription plans</h3>
+            <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:1rem; margin-top:1rem;">
+                <div class="pricing-card" style="background:#0f172a; border-radius:1.5rem; padding:1rem; text-align:center;"><h4>Weekly</h4><div style="font-size:2rem;">$3</div><div>500 Credits</div><button class="subscribeBtn" data-plan="weekly" data-credits="500" data-price="3">Subscribe</button></div>
+                <div class="pricing-card" style="background:#0f172a; border-radius:1.5rem; padding:1rem; text-align:center; border:2px solid #a855f7;"><h4>15 Days ⭐ best value</h4><div style="font-size:2rem;">$5</div><div>1000 Credits</div><button class="subscribeBtn" data-plan="15days" data-credits="1000" data-price="5">Subscribe</button></div>
+                <div class="pricing-card" style="background:#0f172a; border-radius:1.5rem; padding:1rem; text-align:center;"><h4>Monthly</h4><div style="font-size:2rem;">$10</div><div>2500 Credits</div><button class="subscribeBtn" data-plan="monthly" data-credits="2500" data-price="10">Subscribe</button></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Auth Modal -->
+<div id="authModal" class="modal-overlay">
+    <div class="modal-content">
+        <div style="display: flex; justify-content: space-between; align-items: center;"><h3><i class="fas fa-key"></i> Access Account</h3><button id="closeAuthBtn" style="background:none; border:none; color:white; font-size:1.8rem;">&times;</button></div>
+        <div id="loginForm">
+            <input type="email" id="loginEmail" class="premium-input" placeholder="Email" style="margin:1rem 0 0.5rem;">
+            <input type="password" id="loginPassword" class="premium-input" placeholder="Password">
+            <div style="display:flex; justify-content:space-between; margin:0.5rem 0;">
+                <label><input type="checkbox" id="rememberMe"> Remember me</label>
+                <a href="#" id="forgotPasswordLink" style="color:#a855f7;">Forgot password?</a>
+            </div>
+            <div id="forgotPasswordForm" style="display: none; margin-top: 12px;">
+                <input type="email" id="resetEmail" class="premium-input" placeholder="Enter your email" style="margin-bottom: 8px;">
+                <button id="sendResetBtn" class="btn-secondary" style="width: 100%;">Send reset email</button>
+                <button id="cancelResetBtn" class="btn-secondary" style="width: 100%; margin-top: 4px;">Cancel</button>
+            </div>
+            <button id="doLoginBtn" class="btn-primary" style="width:100%;">Sign In</button>
+            <div style="text-align:center; margin:1rem 0;">or</div>
+            <button id="googleSignInBtn" class="btn-secondary" style="display:flex; align-items:center; justify-content:center; gap:8px; width:100%;"><i class="fab fa-google"></i> Continue with Google</button>
+            <div id="googleErrorMsg" class="error-text"></div>
+            <div style="text-align:center; margin-top:1rem;">Don't have an account? <a href="#" id="showSignupLink" style="color:#a855f7;">Sign up</a></div>
+        </div>
+        <div id="signupForm" style="display:none;">
+            <div style="display:flex; gap:0.5rem;"><input id="signupFirst" class="premium-input" placeholder="First name"><input id="signupLast" class="premium-input" placeholder="Last name"></div>
+            <input id="signupEmail" class="premium-input" placeholder="Email">
+            <input id="signupPassword" class="premium-input" placeholder="Password">
+            <input id="signupConfirm" class="premium-input" placeholder="Confirm password">
+            <button id="doSignupBtn" class="btn-primary" style="width:100%; margin-top:1rem;">Create account</button>
+            <div style="text-align:center; margin:1rem 0;">or</div>
+            <button id="googleSignupBtn" class="btn-secondary" style="display:flex; align-items:center; justify-content:center; gap:8px; width:100%;"><i class="fab fa-google"></i> Continue with Google</button>
+            <div style="text-align:center; margin-top:1rem;">Already have an account? <a href="#" id="showLoginLink" style="color:#a855f7;">Sign in</a></div>
+        </div>
+    </div>
+</div>
+
+<!-- Payment Modal -->
+<div id="paymentModal" class="modal-overlay">
+    <div class="modal-content" style="text-align: left;">
+        <h3>💳 Secure Checkout</h3>
+        <div id="paymentSummary" style="background:#0f172a; border-radius:1rem; padding:0.8rem; margin:1rem 0;">
+            <div><strong>Plan:</strong> <span id="paymentPlanName"></span></div>
+            <div><strong>Credits:</strong> <span id="paymentCredits"></span></div>
+            <div><strong>Total:</strong> $<span id="paymentAmount"></span></div>
+        </div>
+        <div id="card-element" class="premium-input" style="padding:0.75rem;"></div>
+        <div id="card-errors" role="alert" style="color: #f87171; font-size: 0.8rem; margin-top: 0.5rem;"></div>
+        <button id="confirmPaymentBtn" class="btn-primary" style="width:100%; margin-top:1rem;">Pay now</button>
+        <button id="cancelPaymentBtn" class="btn-secondary" style="width:100%; margin-top:0.5rem;">Cancel</button>
+        <div style="display:flex; gap:0.8rem; justify-content:center; margin-top:1rem;">
+            <button id="applePayMock" class="btn-secondary" style="flex:1;"><i class="fab fa-apple-pay"></i> Apple Pay</button>
+            <button id="googlePayMock" class="btn-secondary" style="flex:1;"><i class="fab fa-google-pay"></i> Google Pay</button>
+        </div>
+    </div>
+</div>
+
+<script type="importmap">
+    {
+        "imports": {
+            "firebase/app": "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js",
+            "firebase/auth": "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js",
+            "firebase/firestore": "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js"
+        }
+    }
+</script>
+<script src="https://js.stripe.com/v3/"></script>
+<script type="module">
+    import { initializeApp } from "firebase/app";
+    import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut, updateProfile, sendPasswordResetEmail } from "firebase/auth";
+    import { getFirestore, doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
+
+    // ✅ CRITICAL FIX: use absolute backend URL (port 3000)
+    const API_BASE = "http://localhost:3000/api";
+
+    const firebaseConfig = {
+        apiKey: "AIzaSyAe8-hjKY0OXgiMsyA2nf4Qup-KCrWKOw8",
+        authDomain: "future-mystery-495215-d8.firebaseapp.com",
+        projectId: "future-mystery-495215-d8",
+        storageBucket: "future-mystery-495215-d8.firebasestorage.app",
+        messagingSenderId: "768195103837",
+        appId: "1:768195103837:web:e74c69b1dff4ece58651b4",
+        measurementId: "G-7P5TBH6NJ8"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app, "mydata");
+
+    // ---------- Global state ----------
+    let currentUser = null;
+    let idToken = null;
+    let credits = 20, gallery = [], lastDaily = null, totalGenerations = 0;
+    let currentGenImage = null, currentEditImg = null, activeStyle = "realistic";
+    let subscription = { plan: "free", expiry: null };
+    let stripe = null;
+    let elements = null;
+    let card = null;
+    let clientSecret = null;
+    let pendingPlan = null;
+
+    function showToast(msg, isErr = false) {
+        const toast = document.createElement("div");
+        toast.className = "toast";
+        toast.innerText = (isErr ? "❌ " : "✅ ") + msg;
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 3000);
+    }
+
+    async function saveUserToFirestore(user, additionalData = {}) {
+        if (!user) return false;
+        const userRef = doc(db, "users", user.uid);
+        try {
+            const snap = await getDoc(userRef);
+            if (!snap.exists()) {
+                const firstName = additionalData.firstName || (user.displayName ? user.displayName.split(" ")[0] : "");
+                const lastName = additionalData.lastName || (user.displayName ? user.displayName.split(" ").slice(1).join(" ") : "");
+                await setDoc(userRef, {
+                    firstName, lastName,
+                    email: user.email, uid: user.uid,
+                    photoURL: user.photoURL || "",
+                    createdAt: serverTimestamp()
+                });
+                console.log("✅ User saved to Firestore");
+            }
+            return true;
+        } catch (err) {
+            console.error("Firestore error:", err);
+            return false;
+        }
+    }
+
+    function updateNavbarAfterLogin(user) {
+        const avatarDiv = document.getElementById("userAvatarBtn");
+        if (!avatarDiv) return;
+        if (user && user.photoURL) avatarDiv.innerHTML = `<img src="${user.photoURL}" class="avatar">`;
+        else if (user) avatarDiv.innerHTML = `<i class="fas fa-user-check"></i>`;
+        else avatarDiv.innerHTML = `<i class="fas fa-user-astronaut"></i>`;
+    }
+
+    function loadUserData() {
+        if (!currentUser) {
+            credits = 20; gallery = []; totalGenerations = 0;
+            subscription = { plan: "free", expiry: null }; lastDaily = null;
+        } else {
+            credits = parseInt(localStorage.getItem(`credits_${currentUser.uid}`) || "20");
+            gallery = JSON.parse(localStorage.getItem(`gallery_${currentUser.uid}`) || "[]");
+            lastDaily = localStorage.getItem(`daily_ts_${currentUser.uid}`) ? parseInt(localStorage.getItem(`daily_ts_${currentUser.uid}`)) : null;
+            totalGenerations = parseInt(localStorage.getItem(`total_generations_${currentUser.uid}`) || "0");
+            subscription.plan = localStorage.getItem(`subscription_plan_${currentUser.uid}`) || "free";
+            subscription.expiry = localStorage.getItem(`subscription_expiry_${currentUser.uid}`) || null;
+        }
+        updateUI();
+        renderGallery();
+    }
+    function saveUserData() {
+        if (!currentUser) return;
+        localStorage.setItem(`credits_${currentUser.uid}`, credits);
+        localStorage.setItem(`gallery_${currentUser.uid}`, JSON.stringify(gallery));
+        if (lastDaily) localStorage.setItem(`daily_ts_${currentUser.uid}`, lastDaily);
+        localStorage.setItem(`total_generations_${currentUser.uid}`, totalGenerations);
+        localStorage.setItem(`subscription_plan_${currentUser.uid}`, subscription.plan);
+        if (subscription.expiry) localStorage.setItem(`subscription_expiry_${currentUser.uid}`, subscription.expiry);
+        updateUI();
+    }
+
+    function updateUI() {
+        document.getElementById("creditDisplay").innerText = credits;
+        if (document.getElementById("dashCredits")) document.getElementById("dashCredits").innerText = credits;
+        if (document.getElementById("dashCount")) document.getElementById("dashCount").innerText = gallery.length;
+        if (document.getElementById("dashTotalGen")) document.getElementById("dashTotalGen").innerText = totalGenerations;
+        if (document.getElementById("subPlanText")) document.getElementById("subPlanText").innerText = subscription.plan === "free" ? "Free tier" : `${subscription.plan} plan`;
+        if (document.getElementById("subExpiry")) document.getElementById("subExpiry").innerText = subscription.expiry ? new Date(subscription.expiry).toLocaleDateString() : "—";
+        const lastPreviewImg = document.getElementById("lastPreviewImg");
+        if (lastPreviewImg) {
+            if (gallery.length && gallery[0]) lastPreviewImg.src = gallery[0];
+            else if (currentGenImage) lastPreviewImg.src = currentGenImage;
+            else lastPreviewImg.src = "";
+        }
+        if (document.getElementById("lastPreviewText")) document.getElementById("lastPreviewText").innerText = (gallery.length || currentGenImage) ? "Preview" : "No preview";
+        setDailyTimer();
+    }
+
+    function setDailyTimer() {
+        const dailyBtn = document.getElementById("dailyRewardBtn");
+        if (!dailyBtn) return;
+        let timerSpan = document.getElementById("dailyTimer");
+        if (!timerSpan) {
+            timerSpan = document.createElement("span");
+            timerSpan.id = "dailyTimer";
+            dailyBtn.appendChild(timerSpan);
+        }
+        if (lastDaily && (Date.now() - lastDaily) < 86400000) {
+            const hoursLeft = Math.ceil((86400000 - (Date.now() - lastDaily)) / 3600000);
+            timerSpan.innerText = `(${hoursLeft}h left)`;
+            dailyBtn.style.opacity = "0.6";
+            dailyBtn.style.pointerEvents = "none";
+        } else {
+            timerSpan.innerText = "";
+            dailyBtn.style.opacity = "1";
+            dailyBtn.style.pointerEvents = "auto";
+        }
+    }
+
+    function renderGallery() {
+        const container = document.getElementById("galleryContainer");
+        if (!container) return;
+        if (!gallery.length) {
+            container.innerHTML = "<p style='text-align:center'>No saved images</p>";
+            return;
+        }
+        container.innerHTML = "";
+        gallery.forEach(imgUrl => {
+            const div = document.createElement("div");
+            div.className = "gallery-card";
+            div.onclick = () => window.open(imgUrl);
+            div.innerHTML = `<img src="${imgUrl}"><div style="padding:0.5rem;"><button class="btn-secondary" onclick="event.stopPropagation(); downloadUrl('${imgUrl}')">Download</button></div>`;
+            container.appendChild(div);
+        });
+    }
+
+    function downloadUrl(url) {
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `ai_image_${Date.now()}.png`;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => a.remove(), 100);
+    }
+
+    // ---------- Auth functions ----------
+    async function signupWithEmail() {
+        const first = document.getElementById("signupFirst").value.trim();
+        const last = document.getElementById("signupLast").value.trim();
+        const email = document.getElementById("signupEmail").value.trim();
+        const password = document.getElementById("signupPassword").value;
+        const confirm = document.getElementById("signupConfirm").value;
+        if (!first || !last || !email || !password) { showToast("Please fill all fields", true); return; }
+        if (password !== confirm) { showToast("Passwords do not match", true); return; }
+        try {
+            const userCred = await createUserWithEmailAndPassword(auth, email, password);
+            await updateProfile(userCred.user, { displayName: `${first} ${last}` });
+            await saveUserToFirestore(userCred.user, { firstName: first, lastName: last });
+            showToast("Signup Successful ✅");
+            closeAuthModal();
+        } catch (err) { showToast(err.message, true); }
+    }
+
+    async function loginWithEmail() {
+        const email = document.getElementById("loginEmail").value.trim();
+        const password = document.getElementById("loginPassword").value;
+        if (!email || !password) { showToast("Email and password required", true); return; }
+        try {
+            await signInWithEmailAndPassword(auth, email, password);
+            showToast("Login Successful ✅");
+            closeAuthModal();
+        } catch (err) { showToast(err.message, true); }
+    }
+
+    async function loginWithGoogle() {
+        const provider = new GoogleAuthProvider();
+        try {
+            await signInWithPopup(auth, provider);
+            showToast("Google Login Successful ✅");
+            closeAuthModal();
+        } catch (err) {
+            if (err.code === "auth/operation-not-allowed") {
+                showToast("Google Sign-In not enabled in Firebase Console.", true);
+            } else {
+                showToast(err.message, true);
+            }
+            document.getElementById("googleErrorMsg").innerText = err.message;
+        }
+    }
+
+    async function logout() {
+        await signOut(auth);
+        localStorage.clear();
+        window.location.reload();
+    }
+
+    // Forgot password handlers
+    document.getElementById("forgotPasswordLink")?.addEventListener("click", (e) => {
+        e.preventDefault();
+        document.getElementById("forgotPasswordForm").style.display = "block";
+    });
+    document.getElementById("sendResetBtn")?.addEventListener("click", async () => {
+        const email = document.getElementById("resetEmail").value.trim();
+        if (!email) { showToast("Enter your email address", true); return; }
+        try {
+            await sendPasswordResetEmail(auth, email);
+            showToast("Password reset email sent!");
+            document.getElementById("forgotPasswordForm").style.display = "none";
+            document.getElementById("resetEmail").value = "";
+        } catch (err) { showToast(err.message, true); }
+    });
+    document.getElementById("cancelResetBtn")?.addEventListener("click", () => {
+        document.getElementById("forgotPasswordForm").style.display = "none";
+        document.getElementById("resetEmail").value = "";
+    });
+
+    // ---------- Stripe (with correct API_BASE) ----------
+    async function initStripe() {
+        try {
+            console.log("Initializing Stripe, calling:", `${API_BASE}/stripe-key`);
+            const res = await fetch(`${API_BASE}/stripe-key`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            if (data.publishableKey && data.publishableKey.startsWith("pk_")) {
+                stripe = Stripe(data.publishableKey);
+                const elements = stripe.elements();
+                card = elements.create("card", { style: { base: { color: "#fff", fontSize: "16px" } } });
+                card.mount("#card-element");
+                card.addEventListener("change", (event) => {
+                    const displayError = document.getElementById("card-errors");
+                    displayError.textContent = event.error ? event.error.message : "";
+                });
+                console.log("✅ Stripe initialized successfully");
+            } else {
+                throw new Error("Invalid publishable key");
+            }
+        } catch (err) {
+            console.error("Stripe init failed", err);
+            showToast("Payment system unavailable: " + err.message, true);
+        }
+    }
+
+    async function showPaymentModal(plan, creditsAmt, price) {
+        if (!stripe) await initStripe();
+        if (!stripe) { showToast("Payment system unavailable", true); return; }
+        if (!currentUser) { showToast("Please sign in first", true); openAuthModal(); return; }
+
+        pendingPlan = { plan, creditsAmt, price };
+        document.getElementById("paymentPlanName").innerText = plan.charAt(0).toUpperCase() + plan.slice(1);
+        document.getElementById("paymentCredits").innerText = creditsAmt;
+        document.getElementById("paymentAmount").innerText = price;
+
+        const token = await currentUser.getIdToken();
+        try {
+            const res = await fetch(`${API_BASE}/create-payment-intent`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+                body: JSON.stringify({ amount: price, credits: creditsAmt, planName: plan })
+            });
+            const data = await res.json();
+            if (data.clientSecret) {
+                clientSecret = data.clientSecret;
+                document.getElementById("paymentModal").classList.add("active");
+            } else {
+                throw new Error(data.error || "No client secret");
+            }
+        } catch (err) {
+            console.error("Payment intent error:", err);
+            showToast("Failed to initiate payment: " + err.message, true);
+        }
+    }
+
+    async function confirmPayment() {
+        if (!stripe || !clientSecret) return;
+        const { error, paymentIntent } = await stripe.confirmCardPayment(clientSecret, { payment_method: { card: card } });
+        if (error) {
+            showToast(error.message, true);
+            document.getElementById("card-errors").innerText = error.message;
+        } else if (paymentIntent.status === "succeeded") {
+            credits += pendingPlan.creditsAmt;
+            subscription.plan = pendingPlan.plan;
+            const expiry = new Date();
+            if (pendingPlan.plan === "weekly") expiry.setDate(expiry.getDate() + 7);
+            else if (pendingPlan.plan === "15days") expiry.setDate(expiry.getDate() + 15);
+            else if (pendingPlan.plan === "monthly") expiry.setMonth(expiry.getMonth() + 1);
+            subscription.expiry = expiry.toISOString();
+            saveUserData();
+            updateUI();
+            showToast(`Payment successful! +${pendingPlan.creditsAmt} credits added.`);
+            document.getElementById("paymentModal").classList.remove("active");
+            if (card) card.clear();
+            pendingPlan = null;
+            clientSecret = null;
+        }
+    }
+
+    function claimDaily() {
+        if (!currentUser) { showToast("Please sign in first", true); return; }
+        const now = Date.now();
+        if (lastDaily && now - lastDaily < 86400000) { showToast("Already claimed today", true); return; }
+        credits += 10;
+        lastDaily = now;
+        saveUserData();
+        updateUI();
+        showToast("+10 free credits!");
+    }
+
+    // AI API calls
+    async function fetchWithAuth(url, options = {}) {
+        if (!idToken) throw new Error("No auth token");
+        const headers = { ...options.headers, "Authorization": `Bearer ${idToken}` };
+        const res = await fetch(`${API_BASE}${url}`, { ...options, headers });
+        if (res.status === 401) {
+            showToast("Session expired, please login again", true);
+            logout();
+            throw new Error("Unauthorized");
+        }
+        return res;
+    }
+
+    async function generate() {
+        if (!currentUser) { showToast("Please sign in first", true); return; }
+        const prompt = document.getElementById("genPrompt").value.trim();
+        if (!prompt) { showToast("Enter a prompt", true); return; }
+        if (credits < 1) { showToast("Insufficient credits", true); return; }
+        document.getElementById("genLoader").style.display = "block";
+        document.getElementById("genResult").style.display = "none";
+        try {
+            const res = await fetchWithAuth("/generate", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ prompt, style: activeStyle })
+            });
+            const data = await res.json();
+            if (!data.success) throw new Error(data.error);
+            currentGenImage = data.imageUrl;
+            document.getElementById("genImage").src = currentGenImage;
+            credits--;
+            totalGenerations++;
+            saveUserData();
+            updateUI();
+            document.getElementById("genLoader").style.display = "none";
+            document.getElementById("genResult").style.display = "block";
+            showToast("Generated!");
+        } catch (err) {
+            showToast(err.message, true);
+            document.getElementById("genLoader").style.display = "none";
+        }
+    }
+
+    async function editImage() {
+        if (!currentUser) { showToast("Please sign in", true); return; }
+        const file = document.getElementById("editUpload").files[0];
+        const editDesc = document.getElementById("editPrompt").value;
+        if (!file || !editDesc) { showToast("Select image and edit description", true); return; }
+        if (credits < 2) { showToast("Need 2 credits", true); return; }
+        const fd = new FormData();
+        fd.append("image", file);
+        fd.append("prompt", editDesc);
+        document.getElementById("editLoader").style.display = "block";
+        document.getElementById("editResult").style.display = "none";
+        try {
+            const res = await fetchWithAuth("/edit", { method: "POST", body: fd });
+            const data = await res.json();
+            if (!data.success) throw new Error(data.error);
+            currentEditImg = data.imageUrl;
+            document.getElementById("editResultImg").src = currentEditImg;
+            credits -= 2;
+            saveUserData();
+            updateUI();
+            document.getElementById("editLoader").style.display = "none";
+            document.getElementById("editResult").style.display = "block";
+            showToast("Edited (face preserved)");
+        } catch (err) {
+            showToast(err.message, true);
+            document.getElementById("editLoader").style.display = "none";
+        }
+    }
+
+    async function enhancePrompt() {
+        const prompt = document.getElementById("genPrompt").value;
+        if (!prompt) return;
+        showToast("Enhancing...");
+        setTimeout(() => {
+            document.getElementById("genPrompt").value = prompt + ", ultra detailed, 4k, masterpiece";
+            showToast("Enhanced");
+        }, 500);
+    }
+
+    function saveCurrentToGallery(isEdited = false) {
+        const img = isEdited ? currentEditImg : currentGenImage;
+        if (!img) { showToast("No image to save", true); return; }
+        gallery.unshift(img);
+        saveUserData();
+        renderGallery();
+        showToast("Saved to gallery");
+    }
+
+    // ---------- Auth state ----------
+    onAuthStateChanged(auth, async (user) => {
+        currentUser = user;
+        if (user) {
+            idToken = await user.getIdToken();
+            await saveUserToFirestore(user);
+            updateNavbarAfterLogin(user);
+            loadUserData();
+            closeAuthModal();
+        } else {
+            idToken = null;
+            updateNavbarAfterLogin(null);
+            loadUserData();
+            openAuthModal();
+        }
+    });
+
+    // ---------- Event listeners ----------
+    function openAuthModal() { document.getElementById("authModal").classList.add("active"); }
+    function closeAuthModal() { document.getElementById("authModal").classList.remove("active"); }
+
+    document.addEventListener("DOMContentLoaded", () => {
+        // Avatar menu
+        document.getElementById("userAvatarBtn")?.addEventListener("click", () => {
+            if (currentUser) {
+                const existing = document.querySelector(".user-menu");
+                if (existing) existing.remove();
+                const menu = document.createElement("div");
+                menu.className = "user-menu glass-card";
+                menu.innerHTML = `
+                    <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+                        <img src="${currentUser.photoURL || ''}" style="width:32px; height:32px; border-radius:50%;">
+                        <div><strong>${currentUser.displayName || currentUser.email}</strong><br>${currentUser.email}</div>
+                    </div>
+                    <button id="logoutBtnFromMenu" class="btn-secondary" style="width:100%;">Logout</button>
+                `;
+                document.body.appendChild(menu);
+                document.getElementById("logoutBtnFromMenu").addEventListener("click", logout);
+                setTimeout(() => {
+                    const closeHandler = (e) => {
+                        if (!menu.contains(e.target) && e.target !== document.getElementById("userAvatarBtn")) {
+                            menu.remove();
+                            document.removeEventListener("click", closeHandler);
+                        }
+                    };
+                    document.addEventListener("click", closeHandler);
+                }, 100);
+            } else {
+                openAuthModal();
+            }
+        });
+
+        document.getElementById("closeAuthBtn")?.addEventListener("click", closeAuthModal);
+        document.getElementById("showSignupLink")?.addEventListener("click", (e) => { e.preventDefault(); document.getElementById("loginForm").style.display = "none"; document.getElementById("signupForm").style.display = "block"; });
+        document.getElementById("showLoginLink")?.addEventListener("click", (e) => { e.preventDefault(); document.getElementById("signupForm").style.display = "none"; document.getElementById("loginForm").style.display = "block"; });
+        document.getElementById("doLoginBtn")?.addEventListener("click", loginWithEmail);
+        document.getElementById("doSignupBtn")?.addEventListener("click", signupWithEmail);
+        document.getElementById("googleSignInBtn")?.addEventListener("click", loginWithGoogle);
+        document.getElementById("googleSignupBtn")?.addEventListener("click", loginWithGoogle);
+
+        document.getElementById("genBtn")?.addEventListener("click", generate);
+        document.getElementById("enhanceBtn")?.addEventListener("click", enhancePrompt);
+        document.getElementById("editBtn")?.addEventListener("click", editImage);
+        document.getElementById("saveGenBtn")?.addEventListener("click", () => saveCurrentToGallery(false));
+        document.getElementById("saveEditBtn")?.addEventListener("click", () => saveCurrentToGallery(true));
+        document.getElementById("downloadGenBtn")?.addEventListener("click", () => currentGenImage && downloadUrl(currentGenImage));
+        document.getElementById("downloadEditBtn")?.addEventListener("click", () => currentEditImg && downloadUrl(currentEditImg));
+        document.getElementById("dailyRewardBtn")?.addEventListener("click", claimDaily);
+
+        // Subscription buttons
+        document.querySelectorAll(".subscribeBtn").forEach(btn => {
+            btn.addEventListener("click", () => {
+                if (!currentUser) { showToast("Please sign in first", true); openAuthModal(); return; }
+                showPaymentModal(btn.dataset.plan, parseInt(btn.dataset.credits), parseInt(btn.dataset.price));
+            });
+        });
+        document.getElementById("confirmPaymentBtn")?.addEventListener("click", confirmPayment);
+        document.getElementById("cancelPaymentBtn")?.addEventListener("click", () => document.getElementById("paymentModal").classList.remove("active"));
+        document.getElementById("applePayMock")?.addEventListener("click", () => showToast("Apple Pay coming soon", true));
+        document.getElementById("googlePayMock")?.addEventListener("click", () => showToast("Google Pay coming soon", true));
+        document.getElementById("upgradePlanBtn")?.addEventListener("click", () => document.getElementById("paymentModal").classList.add("active"));
+
+        // Tabs
+        document.querySelectorAll(".tab").forEach(tab => {
+            tab.addEventListener("click", () => {
+                const target = tab.dataset.tab;
+                document.querySelectorAll(".tab-pane").forEach(pane => pane.style.display = "none");
+                const pane = document.getElementById(`${target}Tab`);
+                if (pane) pane.style.display = "block";
+                document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+                tab.classList.add("active");
+                if (target === "gallery") renderGallery();
+            });
+        });
+
+        // Style cards
+        document.querySelectorAll(".style-card").forEach(card => {
+            card.addEventListener("click", () => {
+                document.querySelectorAll(".style-card").forEach(c => c.classList.remove("active"));
+                card.classList.add("active");
+                activeStyle = card.dataset.style;
+            });
+        });
+
+        // Upload zone
+        const zone = document.getElementById("uploadZone");
+        const fileInput = document.getElementById("editUpload");
+        if (zone && fileInput) {
+            zone.addEventListener("click", () => fileInput.click());
+            zone.addEventListener("dragover", e => e.preventDefault());
+            zone.addEventListener("drop", e => {
+                e.preventDefault();
+                if (e.dataTransfer.files.length) fileInput.files = e.dataTransfer.files;
+                fileInput.dispatchEvent(new Event("change"));
+            });
+            fileInput.addEventListener("change", (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = ev => document.getElementById("editPreview").innerHTML = `<img src="${ev.target.result}" style="max-width:200px; border-radius:16px;">`;
+                    reader.readAsDataURL(file);
+                }
+            });
+        }
+
+        loadUserData();
+        initStripe();
+    });
+</script>
+</body>
+</html>
