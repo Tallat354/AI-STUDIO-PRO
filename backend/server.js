@@ -20,7 +20,7 @@ console.log("Stripe keys loaded:", !!STRIPE_PUBLISHABLE_KEY, !!STRIPE_SECRET_KEY
 const stripe = new Stripe(STRIPE_SECRET_KEY);
 fal.config({ credentials: process.env.FAL_KEY });
 
-// ---------- Firebase Admin ----------
+// ---------- Firebase Admin (ensure it's the same project as frontend) ----------
 let db = null;
 try {
     const firebaseConfig = JSON.parse(process.env.FIREBASE_CONFIG);
@@ -46,7 +46,7 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// ---------- Auth middleware ----------
+// ---------- Auth middleware (verify Firebase ID token) ----------
 async function ensureAuthenticated(req, res, next) {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -64,20 +64,6 @@ async function ensureAuthenticated(req, res, next) {
         console.error("Token verification failed:", error.message);
         return res.status(401).json({ error: "Invalid token" });
     }
-}
-
-// ========== Helper to ensure user document exists ==========
-async function ensureUserDocument(userId) {
-    const userRef = db.collection("users").doc(userId);
-    const doc = await userRef.get();
-    if (!doc.exists) {
-        await userRef.set({
-            credits: 20,
-            createdAt: admin.firestore.FieldValue.serverTimestamp()
-        });
-        console.log(`Created new user document for ${userId} with 20 credits`);
-    }
-    return userRef;
 }
 
 // ========== STRIPE ROUTES ==========
@@ -102,24 +88,27 @@ app.post("/api/create-payment-intent", ensureAuthenticated, async (req, res) => 
     }
 });
 
-// ========== PAYMENT SUCCESS – UPDATE FIRESTORE ==========
+// ========== PAYMENT SUCCESS – UPDATE FIRESTORE (FIXED) ==========
 app.post("/api/payment-success", ensureAuthenticated, async (req, res) => {
     console.log("🔥 Payment success endpoint hit");
     console.log("Request body:", req.body);
 
     try {
         const { userId, credits, plan } = req.body;
-        if (!userId || !credits || isNaN(credits)) {
-            return res.status(400).json({ error: "Missing userId or invalid credits" });
+        if (!userId) {
+            return res.status(400).json({ error: "Missing userId" });
+        }
+        if (!credits || isNaN(credits)) {
+            return res.status(400).json({ error: "Invalid credits amount" });
         }
 
-        // Ensure user document exists
-        await ensureUserDocument(userId);
         const userRef = db.collection("users").doc(userId);
-        const updateData = {
+        // Increment credits (if document doesn't exist, it will be created)
+        await userRef.set({
             credits: admin.firestore.FieldValue.increment(parseInt(credits))
-        };
+        }, { merge: true });
 
+        // If plan is provided, also update subscription info
         if (plan) {
             let days = 0;
             let planName = "";
@@ -132,17 +121,17 @@ app.post("/api/payment-success", ensureAuthenticated, async (req, res) => {
             if (days > 0) {
                 const expiresAt = new Date();
                 expiresAt.setDate(expiresAt.getDate() + days);
-                updateData.subscriptionPlan = planName;
-                updateData.subscriptionExpiry = expiresAt;
+                await userRef.set({
+                    subscriptionPlan: planName,
+                    subscriptionExpiry: expiresAt,
+                    lastUpdated: admin.firestore.FieldValue.serverTimestamp()
+                }, { merge: true });
             }
         }
-        updateData.lastUpdated = admin.firestore.FieldValue.serverTimestamp();
 
-        await userRef.set(updateData, { merge: true });
-
-        // Fetch updated credits to return
+        // Fetch updated document to return new credit balance
         const updatedDoc = await userRef.get();
-        const newCredits = updatedDoc.data().credits;
+        const newCredits = updatedDoc.data()?.credits || 0;
 
         console.log(`✅ Updated user ${userId}: +${credits} credits, new total: ${newCredits}`);
         res.json({ success: true, newCredits: newCredits });
@@ -152,24 +141,7 @@ app.post("/api/payment-success", ensureAuthenticated, async (req, res) => {
     }
 });
 
-// ========== GET USER CREDITS ==========
-app.get("/api/user/credits/:userId", ensureAuthenticated, async (req, res) => {
-    try {
-        const { userId } = req.params;
-        if (req.user.uid !== userId) {
-            return res.status(403).json({ error: "Unauthorized" });
-        }
-        await ensureUserDocument(userId);
-        const userDoc = await db.collection("users").doc(userId).get();
-        const credits = userDoc.data().credits || 20;
-        res.json({ credits });
-    } catch (error) {
-        console.error("Error fetching credits:", error);
-        res.status(500).json({ error: "Failed to fetch credits" });
-    }
-});
-
-// ========== DAILY REWARD ==========
+// ========== DAILY REWARD – FIXED ==========
 app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
     try {
         const { userId } = req.body;
@@ -177,8 +149,6 @@ app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
             return res.status(400).json({ error: "Missing userId" });
         }
 
-        // Ensure user document exists
-        await ensureUserDocument(userId);
         const userRef = db.collection("users").doc(userId);
         const userDoc = await userRef.get();
 
@@ -194,14 +164,14 @@ app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
             });
         }
 
-        // Increment credits AND store last claim time
+        // Increment credits and update last claim time
         await userRef.set({
             credits: admin.firestore.FieldValue.increment(10),
             lastDailyReward: now
         }, { merge: true });
 
         const updatedDoc = await userRef.get();
-        const newCredits = updatedDoc.data().credits;
+        const newCredits = updatedDoc.data()?.credits || 0;
 
         console.log(`✅ Daily reward claimed for ${userId}: +10 credits, total: ${newCredits}`);
         res.json({
