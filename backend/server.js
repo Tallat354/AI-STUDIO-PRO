@@ -11,18 +11,21 @@ const admin = require("firebase-admin");
 const path = require("path");
 const Stripe = require("stripe");
 
+// ✅ ONLY ONE PORT DECLARATION (at the top)
+const PORT = process.env.PORT || 3000;
+
 const app = express();
 
-// ========== CORS (allow all) ==========
+// ========== CORS – allow any origin ==========
 app.use(cors({ origin: "*" }));
 app.options("*", cors());
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// ========== Environment ==========
-const PORT = process.env.PORT || 3000;
+// ========== Stripe ==========
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const STRIPE_PUBLISHABLE_KEY = process.env.STRIPE_PUBLISHABLE_KEY;
+if (!STRIPE_SECRET_KEY) console.error("❌ STRIPE_SECRET_KEY missing");
 const stripe = new Stripe(STRIPE_SECRET_KEY);
 fal.config({ credentials: process.env.FAL_KEY });
 
@@ -113,7 +116,7 @@ app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
     }
 });
 
-// ========== AI endpoints (unchanged) ==========
+// ========== AI endpoints ==========
 function shouldPreserveHairstyle(promptText) {
     const lower = promptText.toLowerCase();
     const changeKeywords = ["change hair", "different hair", "new hair", "different hairstyle", "new hairstyle", "change hairstyle", "alter hair", "modify hair", "different haircut", "new haircut"];
@@ -169,12 +172,10 @@ app.post("/api/edit", ensureAuthenticated, upload.single("image"), async (req, r
 });
 
 // ========== Serve frontend static files ==========
-// This will serve your index.html and assets from the "frontend" folder
-// Create a folder named "frontend" in the root of your Render project and put index.html there
 app.use(express.static(path.join(__dirname, "frontend")));
 app.get("*", (req, res) => {
     res.sendFile(path.join(__dirname, "frontend", "index.html"));
 });
 
-const PORT = process.env.PORT || 3000;
+// ========== Start server – uses the PORT variable declared at the top ==========
 app.listen(PORT, () => console.log(`🚀 Backend running on http://localhost:${PORT}`));
