@@ -7,7 +7,6 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
-        /* Your existing CSS – unchanged */
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Inter', sans-serif;
@@ -345,7 +344,6 @@
                 credits = data.credits || 20;
                 subscription.plan = data.subscriptionPlan || "free";
                 subscription.expiry = data.subscriptionExpiry || null;
-                // Save to localStorage for offline use
                 localStorage.setItem(`credits_${uid}`, credits);
                 localStorage.setItem(`subscription_plan_${uid}`, subscription.plan);
                 if (subscription.expiry) localStorage.setItem(`subscription_expiry_${uid}`, subscription.expiry);
@@ -653,7 +651,7 @@
         }
     }
 
-    // ========== DAILY REWARD – FIXED (calls backend) ==========
+    // ========== DAILY REWARD (fixed) ==========
     async function claimDaily() {
         if (!currentUser) {
             showToast("Please sign in first", true);
@@ -675,7 +673,6 @@
 
             // Update credits with the value returned from backend
             credits = data.newCredits;
-            // Also update local storage to reflect the new Firestore value
             localStorage.setItem(`credits_${currentUser.uid}`, credits);
             updateUI();
             showToast(data.message);
@@ -850,7 +847,7 @@
         document.getElementById("saveEditBtn")?.addEventListener("click", () => saveCurrentToGallery(true));
         document.getElementById("downloadGenBtn")?.addEventListener("click", () => currentGenImage && downloadUrl(currentGenImage));
         document.getElementById("downloadEditBtn")?.addEventListener("click", () => currentEditImg && downloadUrl(currentEditImg));
-        document.getElementById("dailyRewardBtn")?.addEventListener("click", claimDaily);   // ✅ Updated
+        document.getElementById("dailyRewardBtn")?.addEventListener("click", claimDaily);   // ✅ Fixed
 
         document.querySelectorAll(".subscribeBtn").forEach(btn => {
             btn.addEventListener("click", () => {
