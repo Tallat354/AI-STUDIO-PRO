@@ -1,24 +1,20 @@
 require("dotenv").config();
-
 const express = require("express");
 const cors = require("cors");
+const path = require("path");
 const multer = require("multer");
 const sharp = require("sharp");
 const FormData = require("form-data");
 const axios = require("axios");
 const fal = require("@fal-ai/serverless-client");
 const admin = require("firebase-admin");
-const path = require("path");
 const Stripe = require("stripe");
 
 const PORT = process.env.PORT || 3000;
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const STRIPE_PUBLISHABLE_KEY = process.env.STRIPE_PUBLISHABLE_KEY;
-
-// Verify keys
-if (!STRIPE_SECRET_KEY) console.error("❌ STRIPE_SECRET_KEY missing in .env");
-if (!STRIPE_PUBLISHABLE_KEY) console.error("❌ STRIPE_PUBLISHABLE_KEY missing in .env");
 const stripe = new Stripe(STRIPE_SECRET_KEY);
+
 fal.config({ credentials: process.env.FAL_KEY });
 
 // Firebase Admin
@@ -57,11 +53,10 @@ async function ensureAuthenticated(req, res, next) {
     }
 }
 
-// ========== STRIPE ROUTES ==========
+// Stripe routes
 app.get("/api/stripe-key", (req, res) => {
     res.json({ publishableKey: STRIPE_PUBLISHABLE_KEY });
 });
-
 app.post("/api/create-payment-intent", ensureAuthenticated, async (req, res) => {
     try {
         const { amount, credits, planName } = req.body;
@@ -69,6 +64,7 @@ app.post("/api/create-payment-intent", ensureAuthenticated, async (req, res) => 
         const paymentIntent = await stripe.paymentIntents.create({
             amount: Math.round(amount * 100),
             currency: "usd",
+            payment_method_types: ['card'],
             metadata: { credits: String(credits), planName }
         });
         res.json({ clientSecret: paymentIntent.client_secret });
@@ -78,13 +74,14 @@ app.post("/api/create-payment-intent", ensureAuthenticated, async (req, res) => 
     }
 });
 
-// ========== AI ENDPOINTS (unchanged) ==========
+// Helper: hairstyle preservation
 function shouldPreserveHairstyle(promptText) {
     const lower = promptText.toLowerCase();
     const changeKeywords = ["change hair", "different hair", "new hair", "different hairstyle", "new hairstyle", "change hairstyle", "alter hair", "modify hair", "different haircut", "new haircut"];
     return !changeKeywords.some(kw => lower.includes(kw));
 }
 
+// AI endpoints (generate, edit) – unchanged but ensureAuthenticated used
 app.post("/api/generate", ensureAuthenticated, async (req, res) => {
     try {
         const { prompt, style } = req.body;
@@ -125,7 +122,7 @@ app.post("/api/edit", ensureAuthenticated, upload.single("image"), async (req, r
             }
         });
         const imageUrl = result?.data?.image?.url || result?.data?.images?.[0]?.url || result?.image?.url || result?.images?.[0]?.url;
-        if (!imageUrl) return res.status(500).json({ error: "No edited image" });
+        if (!imageUrl) return res.status(500).json({ error: "No edited image URL" });
         res.json({ success: true, imageUrl });
     } catch (err) {
         console.error("Edit error:", err.message);
@@ -133,10 +130,18 @@ app.post("/api/edit", ensureAuthenticated, upload.single("image"), async (req, r
     }
 });
 
-// Serve frontend from the 'frontend' folder (one level up)
-app.use(express.static(path.join(__dirname, "..", "frontend")));
+// ========== SERVE FRONTEND (FIXED FOR RENDER) ==========
+// The frontend folder is a sibling of the backend folder.
+// So __dirname is /.../backend, we go up one level and then into frontend.
+const frontendPath = path.join(__dirname, "..", "frontend");
+app.use(express.static(frontendPath));
+// For any route that is not API, send the index.html (client-side routing)
 app.get("*", (req, res) => {
-    res.sendFile(path.join(__dirname, "..", "frontend", "index.html"));
+    if (!req.path.startsWith("/api")) {
+        res.sendFile(path.join(frontendPath, "index.html"));
+    } else {
+        res.status(404).json({ error: "API endpoint not found" });
+    }
 });
 
 app.listen(PORT, () => console.log(`🚀 Backend running on http://localhost:${PORT}`));
