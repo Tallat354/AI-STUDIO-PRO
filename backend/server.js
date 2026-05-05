@@ -13,12 +13,13 @@ const Stripe = require("stripe");
 
 const app = express();
 
-// ========== CORS – allow any origin ==========
+// ========== CORS – MUST BE FIRST ==========
 app.use(cors({
-    origin: "*",
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    origin: "*",                         // allow any origin (your frontend on Render)
+    methods: ["GET", "POST", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"]
 }));
+// Handle preflight requests explicitly
 app.options('*', cors());
 
 const PORT = process.env.PORT || 3000;
@@ -50,8 +51,10 @@ const upload = multer({ storage: multer.memoryStorage() });
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// Auth middleware
+// ========== Middleware: authenticate Firebase token ==========
 async function ensureAuthenticated(req, res, next) {
+    // Allow preflight OPTIONS requests to pass
+    if (req.method === 'OPTIONS') return next();
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
         return res.status(401).json({ error: "No token provided" });
@@ -64,17 +67,18 @@ async function ensureAuthenticated(req, res, next) {
         const decodedToken = await admin.auth().verifyIdToken(idToken);
         req.user = decodedToken;
         next();
-    } catch (err) {
-        console.error("Token verification failed:", err.message);
+    } catch (error) {
+        console.error("Token verification failed:", error.message);
         return res.status(401).json({ error: "Invalid token" });
     }
 }
 
-// ========== Stripe ==========
+// ========== 1. Stripe: return publishable key ==========
 app.get("/api/stripe-key", (req, res) => {
     res.json({ publishableKey: STRIPE_PUBLISHABLE_KEY });
 });
 
+// ========== 2. Stripe: create payment intent ==========
 app.post("/api/create-payment-intent", ensureAuthenticated, async (req, res) => {
     try {
         const { amount, credits, planName } = req.body;
@@ -92,7 +96,7 @@ app.post("/api/create-payment-intent", ensureAuthenticated, async (req, res) => 
     }
 });
 
-// ========== Daily Reward ==========
+// ========== 3. Daily reward ==========
 app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
     try {
         const userId = req.user.uid;
@@ -101,7 +105,6 @@ app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
         const userDoc = await userRef.get();
 
         if (!userDoc.exists) {
-            // Create user document if missing
             await userRef.set({
                 credits: 20,
                 lastDailyClaim: null,
@@ -109,13 +112,12 @@ app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
             });
         }
 
-        const afterCreate = await userRef.get();
-        const lastClaim = afterCreate.data().lastDailyClaim;
+        const existing = await userRef.get();
+        const lastClaim = existing.data().lastDailyClaim;
         if (lastClaim === today) {
             return res.status(400).json({ error: "Daily reward already claimed today" });
         }
 
-        // Increment atomic
         await userRef.update({
             credits: admin.firestore.FieldValue.increment(10),
             lastDailyClaim: today
@@ -125,13 +127,13 @@ app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
         const newCredits = updated.data().credits;
 
         res.json({ success: true, credits: newCredits, message: "+10 credits added" });
-    } catch (err) {
-        console.error("Daily reward error:", err);
-        res.status(500).json({ error: err.message });
+    } catch (error) {
+        console.error("Daily reward error:", error);
+        res.status(500).json({ error: error.message });
     }
 });
 
-// ========== AI Endpoints (unchanged) ==========
+// ========== 4. AI: generate image ==========
 function shouldPreserveHairstyle(promptText) {
     const lower = promptText.toLowerCase();
     const changeKeywords = ["change hair", "different hair", "new hair", "different hairstyle", "new hairstyle", "change hairstyle", "alter hair", "modify hair", "different haircut", "new haircut"];
@@ -162,6 +164,7 @@ app.post("/api/generate", ensureAuthenticated, async (req, res) => {
     }
 });
 
+// ========== 5. AI: edit image (face preserving) ==========
 app.post("/api/edit", ensureAuthenticated, upload.single("image"), async (req, res) => {
     try {
         const { prompt } = req.body;
@@ -186,7 +189,7 @@ app.post("/api/edit", ensureAuthenticated, upload.single("image"), async (req, r
     }
 });
 
-// Serve static frontend (if needed, but frontend may be separate)
+// ========== Serve frontend (optional – if you serve from same backend) ==========
 app.use(express.static(path.join(__dirname, "..", "frontend")));
 app.get("*", (req, res) => {
     res.sendFile(path.join(__dirname, "..", "frontend", "index.html"));
