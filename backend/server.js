@@ -1,33 +1,39 @@
 require("dotenv").config();
+
 const express = require("express");
 const cors = require("cors");
-const path = require("path");
 const multer = require("multer");
 const sharp = require("sharp");
 const FormData = require("form-data");
 const axios = require("axios");
 const fal = require("@fal-ai/serverless-client");
 const admin = require("firebase-admin");
+const path = require("path");
 const Stripe = require("stripe");
 
 const PORT = process.env.PORT || 3000;
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const STRIPE_PUBLISHABLE_KEY = process.env.STRIPE_PUBLISHABLE_KEY;
-const stripe = new Stripe(STRIPE_SECRET_KEY);
 
+// Log key presence (safe for debugging)
+console.log("Stripe keys loaded:", !!STRIPE_PUBLISHABLE_KEY, !!STRIPE_SECRET_KEY);
+
+const stripe = new Stripe(STRIPE_SECRET_KEY);
 fal.config({ credentials: process.env.FAL_KEY });
 
-// Firebase Admin
+// Firebase Admin setup
 let db = null;
 try {
     const firebaseConfig = JSON.parse(process.env.FIREBASE_CONFIG);
     if (firebaseConfig && firebaseConfig.project_id) {
         admin.initializeApp({ credential: admin.credential.cert(firebaseConfig) });
         db = admin.firestore();
-        console.log("✅ Firebase Admin connected");
+        console.log("✅ Firebase Admin connected to Firestore (project:", firebaseConfig.project_id, ")");
+    } else {
+        console.warn("⚠️ Invalid FIREBASE_CONFIG – token verification will fail");
     }
 } catch (err) {
-    console.warn("⚠️ Firebase Admin not configured");
+    console.warn("⚠️ FIREBASE_CONFIG parse error – token verification will fail", err.message);
 }
 
 const app = express();
@@ -37,51 +43,58 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// Auth middleware
+// ---------- Authentication middleware ----------
 async function ensureAuthenticated(req, res, next) {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
-        return res.status(401).json({ error: "No token" });
+        return res.status(401).json({ error: "No token provided" });
     }
     const idToken = authHeader.split(" ")[1];
+    if (!admin.apps.length) {
+        return res.status(500).json({ error: "Firebase not initialized" });
+    }
     try {
-        const decoded = await admin.auth().verifyIdToken(idToken);
-        req.user = decoded;
+        const decodedToken = await admin.auth().verifyIdToken(idToken);
+        req.user = decodedToken;
         next();
-    } catch (err) {
+    } catch (error) {
+        console.error("Token verification failed:", error.message);
         return res.status(401).json({ error: "Invalid token" });
     }
 }
 
-// Stripe routes
+// ---------- Stripe routes ----------
 app.get("/api/stripe-key", (req, res) => {
     res.json({ publishableKey: STRIPE_PUBLISHABLE_KEY });
 });
+
 app.post("/api/create-payment-intent", ensureAuthenticated, async (req, res) => {
     try {
         const { amount, credits, planName } = req.body;
         if (!amount || amount <= 0) throw new Error("Invalid amount");
+
+        // 🔥 FIX: Explicitly set payment_method_types to ['card']
         const paymentIntent = await stripe.paymentIntents.create({
-            amount: Math.round(amount * 100),
+            amount: Math.round(amount * 100),   // convert dollars to cents
             currency: "usd",
-            payment_method_types: ['card'],
+            payment_method_types: ['card'],      // <-- this is the fix
             metadata: { credits: String(credits), planName }
         });
         res.json({ clientSecret: paymentIntent.client_secret });
     } catch (err) {
-        console.error("Stripe error:", err.message);
+        console.error("Stripe create-payment-intent error:", err.message);
         res.status(500).json({ error: err.message });
     }
 });
 
-// Helper: hairstyle preservation
+// ---------- Helper: hairstyle preservation ----------
 function shouldPreserveHairstyle(promptText) {
     const lower = promptText.toLowerCase();
     const changeKeywords = ["change hair", "different hair", "new hair", "different hairstyle", "new hairstyle", "change hairstyle", "alter hair", "modify hair", "different haircut", "new haircut"];
     return !changeKeywords.some(kw => lower.includes(kw));
 }
 
-// AI endpoints (generate, edit) – unchanged but ensureAuthenticated used
+// ---------- 1. Generate image ----------
 app.post("/api/generate", ensureAuthenticated, async (req, res) => {
     try {
         const { prompt, style } = req.body;
@@ -98,7 +111,7 @@ app.post("/api/generate", ensureAuthenticated, async (req, res) => {
             input: { prompt: finalPrompt, image_size: "square_hd", num_images: 1, enable_safety_checker: false }
         });
         const imageUrl = result?.data?.images?.[0]?.url || result?.images?.[0]?.url || result?.data?.image?.url || result?.image?.url;
-        if (!imageUrl) return res.status(500).json({ error: "No image URL" });
+        if (!imageUrl) return res.status(500).json({ error: "No image URL returned" });
         res.json({ success: true, imageUrl });
     } catch (err) {
         console.error("Generate error:", err.message);
@@ -106,6 +119,7 @@ app.post("/api/generate", ensureAuthenticated, async (req, res) => {
     }
 });
 
+// ---------- 2. Face‑preserving edit ----------
 app.post("/api/edit", ensureAuthenticated, upload.single("image"), async (req, res) => {
     try {
         const { prompt } = req.body;
@@ -130,18 +144,13 @@ app.post("/api/edit", ensureAuthenticated, upload.single("image"), async (req, r
     }
 });
 
-// ========== SERVE FRONTEND (FIXED FOR RENDER) ==========
-// The frontend folder is a sibling of the backend folder.
-// So __dirname is /.../backend, we go up one level and then into frontend.
-const frontendPath = path.join(__dirname, "..", "frontend");
-app.use(express.static(frontendPath));
-// For any route that is not API, send the index.html (client-side routing)
+// ---------- Serve frontend (important for Render) ----------
+// Adjust the path based on your folder structure:
+// If backend and frontend are siblings: use ../frontend
+// If frontend is inside backend: use frontend
+app.use(express.static(path.join(__dirname, "..", "frontend")));
 app.get("*", (req, res) => {
-    if (!req.path.startsWith("/api")) {
-        res.sendFile(path.join(frontendPath, "index.html"));
-    } else {
-        res.status(404).json({ error: "API endpoint not found" });
-    }
+    res.sendFile(path.join(__dirname, "..", "frontend", "index.html"));
 });
 
 app.listen(PORT, () => console.log(`🚀 Backend running on http://localhost:${PORT}`));
