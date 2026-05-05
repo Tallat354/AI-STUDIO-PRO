@@ -3,11 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>AI Studio Pro – Production Ready</title>
+    <title>AI Studio Pro – Complete Working</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
-        /* Your existing CSS – unchanged (keep as is) */
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Inter', sans-serif;
@@ -163,7 +162,7 @@
         </div>
     </div>
 
-    <!-- Tabs, Generate, Edit, Gallery, Dashboard – same structure (keep your existing content) -->
+    <!-- Tabs -->
     <div class="tabs">
         <button class="tab active" data-tab="generate">🎨 Generate</button>
         <button class="tab" data-tab="edit">✏️ Edit / Face</button>
@@ -171,7 +170,7 @@
         <button class="tab" data-tab="dashboard">📊 Dashboard</button>
     </div>
 
-    <!-- Tab contents – unchanged (keep your existing HTML) -->
+    <!-- Generate Tab -->
     <div id="generateTab" class="tab-pane">
         <div class="glass-card" style="padding: 1.8rem;">
             <h3>✨ Text‑to‑Image (Flux Dev)</h3>
@@ -191,6 +190,7 @@
         <div id="genResult" style="display:none; text-align:center;"><img id="genImage" class="result-img"><br><button id="downloadGenBtn" class="btn-secondary">Download</button> <button id="saveGenBtn" class="btn-secondary">Save to gallery</button></div>
     </div>
 
+    <!-- Edit Tab -->
     <div id="editTab" class="tab-pane" style="display:none;">
         <div class="glass-card" style="padding:1.8rem;">
             <h3>🖌️ Face‑preserving editor</h3>
@@ -203,10 +203,12 @@
         <div id="editResult" style="display:none; text-align:center;"><img id="editResultImg" class="result-img"><br><button id="downloadEditBtn" class="btn-secondary">Download</button> <button id="saveEditBtn" class="btn-secondary">Save to gallery</button></div>
     </div>
 
+    <!-- Gallery Tab -->
     <div id="galleryTab" class="tab-pane" style="display:none;">
         <div class="glass-card" style="padding:1.8rem;"><h3>🖼️ Your gallery</h3><div id="galleryContainer" class="gallery-grid"><p>No saved images</p></div></div>
     </div>
 
+    <!-- Dashboard Tab -->
     <div id="dashboardTab" class="tab-pane" style="display:none;">
         <div class="glass-card" style="padding:1.8rem;">
             <h3>📈 Dashboard</h3>
@@ -297,7 +299,6 @@
     import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut, updateProfile, sendPasswordResetEmail } from "firebase/auth";
     import { getFirestore, doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
 
-    // 🔥 FIX: Use relative API path – works on localhost and deployed server
     const API_BASE = "/api";
 
     const firebaseConfig = {
@@ -334,41 +335,57 @@
         setTimeout(() => toast.remove(), 3000);
     }
 
+    // ========== FIRESTORE – load user data on login ==========
+    async function loadUserCreditsFromFirestore(uid) {
+        try {
+            const userDoc = await getDoc(doc(db, "users", uid));
+            if (userDoc.exists()) {
+                const data = userDoc.data();
+                credits = data.credits || 20;
+                subscription.plan = data.subscriptionPlan || "free";
+                subscription.expiry = data.subscriptionExpiry || null;
+                // Also save to localStorage for offline use
+                localStorage.setItem(`credits_${uid}`, credits);
+                localStorage.setItem(`subscription_plan_${uid}`, subscription.plan);
+                if (subscription.expiry) localStorage.setItem(`subscription_expiry_${uid}`, subscription.expiry);
+                return true;
+            }
+        } catch (err) {
+            console.error("Failed to load Firestore user data:", err);
+        }
+        return false;
+    }
+
     async function saveUserToFirestore(user, additionalData = {}) {
         if (!user) return false;
         const userRef = doc(db, "users", user.uid);
         try {
             const snap = await getDoc(userRef);
+            const firstName = additionalData.firstName || (user.displayName ? user.displayName.split(" ")[0] : "");
+            const lastName = additionalData.lastName || (user.displayName ? user.displayName.split(" ").slice(1).join(" ") : "");
+            const baseData = {
+                firstName, lastName,
+                email: user.email,
+                uid: user.uid,
+                photoURL: user.photoURL || "",
+                createdAt: serverTimestamp()
+            };
             if (!snap.exists()) {
-                const firstName = additionalData.firstName || (user.displayName ? user.displayName.split(" ")[0] : "");
-                const lastName = additionalData.lastName || (user.displayName ? user.displayName.split(" ").slice(1).join(" ") : "");
-                await setDoc(userRef, {
-                    firstName, lastName,
-                    email: user.email, uid: user.uid,
-                    photoURL: user.photoURL || "",
-                    createdAt: serverTimestamp()
-                });
-                console.log("✅ User saved to Firestore");
+                await setDoc(userRef, baseData);
             }
             return true;
         } catch (err) {
-            console.error("Firestore error:", err);
+            console.error("Firestore save error:", err);
             return false;
         }
     }
 
-    function updateNavbarAfterLogin(user) {
-        const avatarDiv = document.getElementById("userAvatarBtn");
-        if (!avatarDiv) return;
-        if (user && user.photoURL) avatarDiv.innerHTML = `<img src="${user.photoURL}" class="avatar">`;
-        else if (user) avatarDiv.innerHTML = `<i class="fas fa-user-check"></i>`;
-        else avatarDiv.innerHTML = `<i class="fas fa-user-astronaut"></i>`;
-    }
-
+    // ========== Load / save local data (fallback) ==========
     function loadUserData() {
         if (!currentUser) {
             credits = 20; gallery = []; totalGenerations = 0;
-            subscription = { plan: "free", expiry: null }; lastDaily = null;
+            subscription = { plan: "free", expiry: null };
+            lastDaily = null;
         } else {
             credits = parseInt(localStorage.getItem(`credits_${currentUser.uid}`) || "20");
             gallery = JSON.parse(localStorage.getItem(`gallery_${currentUser.uid}`) || "[]");
@@ -380,6 +397,7 @@
         updateUI();
         renderGallery();
     }
+
     function saveUserData() {
         if (!currentUser) return;
         localStorage.setItem(`credits_${currentUser.uid}`, credits);
@@ -526,10 +544,9 @@
         document.getElementById("resetEmail").value = "";
     });
 
-    // ---------- Stripe (using relative API_BASE) ----------
+    // ---------- Stripe ----------
     async function initStripe() {
         try {
-            console.log("Initializing Stripe, calling:", `${API_BASE}/stripe-key`);
             const res = await fetch(`${API_BASE}/stripe-key`);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
@@ -542,13 +559,11 @@
                     const displayError = document.getElementById("card-errors");
                     displayError.textContent = event.error ? event.error.message : "";
                 });
-                console.log("✅ Stripe initialized successfully");
-            } else {
-                throw new Error("Invalid publishable key");
+                console.log("✅ Stripe initialized");
             }
         } catch (err) {
             console.error("Stripe init failed", err);
-            showToast("Payment system unavailable: " + err.message, true);
+            showToast("Payment system unavailable", true);
         }
     }
 
@@ -563,42 +578,67 @@
         document.getElementById("paymentAmount").innerText = price;
 
         const token = await currentUser.getIdToken();
+        const res = await fetch(`${API_BASE}/create-payment-intent`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+            body: JSON.stringify({ amount: price, credits: creditsAmt, planName: plan })
+        });
+        const data = await res.json();
+        if (data.clientSecret) {
+            clientSecret = data.clientSecret;
+            document.getElementById("paymentModal").classList.add("active");
+        } else {
+            showToast("Failed to initiate payment", true);
+        }
+    }
+
+    async function handlePaymentSuccess(plan) {
+        if (!currentUser) {
+            console.error("No user logged in");
+            return;
+        }
         try {
-            const res = await fetch(`${API_BASE}/create-payment-intent`, {
+            const res = await fetch(`${API_BASE}/payment-success`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-                body: JSON.stringify({ amount: price, credits: creditsAmt, planName: plan })
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${idToken}`
+                },
+                body: JSON.stringify({
+                    userId: currentUser.uid,
+                    plan: plan
+                })
             });
             const data = await res.json();
-            if (data.clientSecret) {
-                clientSecret = data.clientSecret;
-                document.getElementById("paymentModal").classList.add("active");
-            } else {
-                throw new Error(data.error || "No client secret");
-            }
+            if (!data.success) throw new Error(data.error);
+            console.log("Backend update successful:", data);
+            // Reload Firestore data to reflect updated credits/plan
+            await loadUserCreditsFromFirestore(currentUser.uid);
+            // Update local state that was maybe overwritten
+            credits = data.credits;
+            subscription.plan = data.plan;
+            subscription.expiry = data.expiresAt;
+            saveUserData();
+            updateUI();
+            showToast(`Subscription updated! +${data.credits} credits added.`);
         } catch (err) {
-            console.error("Payment intent error:", err);
-            showToast("Failed to initiate payment: " + err.message, true);
+            console.error("Failed to update backend:", err);
+            showToast("Payment succeeded but failed to update credits. Please contact support.", true);
         }
     }
 
     async function confirmPayment() {
         if (!stripe || !clientSecret) return;
-        const { error, paymentIntent } = await stripe.confirmCardPayment(clientSecret, { payment_method: { card: card } });
+        const { error, paymentIntent } = await stripe.confirmCardPayment(clientSecret, {
+            payment_method: { card: card }
+        });
         if (error) {
             showToast(error.message, true);
             document.getElementById("card-errors").innerText = error.message;
         } else if (paymentIntent.status === "succeeded") {
-            credits += pendingPlan.creditsAmt;
-            subscription.plan = pendingPlan.plan;
-            const expiry = new Date();
-            if (pendingPlan.plan === "weekly") expiry.setDate(expiry.getDate() + 7);
-            else if (pendingPlan.plan === "15days") expiry.setDate(expiry.getDate() + 15);
-            else if (pendingPlan.plan === "monthly") expiry.setMonth(expiry.getMonth() + 1);
-            subscription.expiry = expiry.toISOString();
-            saveUserData();
-            updateUI();
-            showToast(`Payment successful! +${pendingPlan.creditsAmt} credits added.`);
+            // Call backend to update Firestore
+            await handlePaymentSuccess(pendingPlan.plan);
+            // Clean up UI
             document.getElementById("paymentModal").classList.remove("active");
             if (card) card.clear();
             pendingPlan = null;
@@ -617,7 +657,7 @@
         showToast("+10 free credits!");
     }
 
-    // AI API calls (use API_BASE)
+    // ---------- AI API calls ----------
     async function fetchWithAuth(url, options = {}) {
         if (!idToken) throw new Error("No auth token");
         const headers = { ...options.headers, "Authorization": `Bearer ${idToken}` };
@@ -708,14 +748,17 @@
         showToast("Saved to gallery");
     }
 
-    // ---------- Auth state ----------
+    // ---------- Auth state listener ----------
     onAuthStateChanged(auth, async (user) => {
         currentUser = user;
         if (user) {
             idToken = await user.getIdToken();
+            // Ensure Firestore has basic user info
             await saveUserToFirestore(user);
+            // Load credits and subscription from Firestore
+            await loadUserCreditsFromFirestore(user.uid);
             updateNavbarAfterLogin(user);
-            loadUserData();
+            loadUserData(); // this will now have the updated credits from Firestore
             closeAuthModal();
         } else {
             idToken = null;
@@ -725,12 +768,18 @@
         }
     });
 
-    // ---------- Event listeners ----------
+    function updateNavbarAfterLogin(user) {
+        const avatarDiv = document.getElementById("userAvatarBtn");
+        if (!avatarDiv) return;
+        if (user && user.photoURL) avatarDiv.innerHTML = `<img src="${user.photoURL}" class="avatar">`;
+        else if (user) avatarDiv.innerHTML = `<i class="fas fa-user-check"></i>`;
+        else avatarDiv.innerHTML = `<i class="fas fa-user-astronaut"></i>`;
+    }
+
     function openAuthModal() { document.getElementById("authModal").classList.add("active"); }
     function closeAuthModal() { document.getElementById("authModal").classList.remove("active"); }
 
     document.addEventListener("DOMContentLoaded", () => {
-        // Avatar menu
         document.getElementById("userAvatarBtn")?.addEventListener("click", () => {
             if (currentUser) {
                 const existing = document.querySelector(".user-menu");
@@ -777,7 +826,6 @@
         document.getElementById("downloadEditBtn")?.addEventListener("click", () => currentEditImg && downloadUrl(currentEditImg));
         document.getElementById("dailyRewardBtn")?.addEventListener("click", claimDaily);
 
-        // Subscription buttons
         document.querySelectorAll(".subscribeBtn").forEach(btn => {
             btn.addEventListener("click", () => {
                 if (!currentUser) { showToast("Please sign in first", true); openAuthModal(); return; }
@@ -803,7 +851,6 @@
             });
         });
 
-        // Style cards
         document.querySelectorAll(".style-card").forEach(card => {
             card.addEventListener("click", () => {
                 document.querySelectorAll(".style-card").forEach(c => c.classList.remove("active"));
@@ -812,7 +859,6 @@
             });
         });
 
-        // Upload zone
         const zone = document.getElementById("uploadZone");
         const fileInput = document.getElementById("editUpload");
         if (zone && fileInput) {
