@@ -88,7 +88,7 @@ app.post("/api/create-payment-intent", ensureAuthenticated, async (req, res) => 
     }
 });
 
-// ========== PAYMENT SUCCESS – UPDATE FIRESTORE ==========
+// ========== PAYMENT SUCCESS – UPDATE FIRESTORE (document existence handled) ==========
 app.post("/api/payment-success", ensureAuthenticated, async (req, res) => {
     console.log("🔥 Payment success endpoint hit");
     console.log("Request body:", req.body);
@@ -99,10 +99,18 @@ app.post("/api/payment-success", ensureAuthenticated, async (req, res) => {
         if (!credits || isNaN(credits)) return res.status(400).json({ error: "Invalid credits amount" });
 
         const userRef = db.collection("users").doc(userId);
+        const userDoc = await userRef.get();
+        if (!userDoc.exists) {
+            // First time user – create document with initial 20 credits
+            await userRef.set({ credits: 20, createdAt: admin.firestore.FieldValue.serverTimestamp() });
+        }
+
+        // Now increment credits
         await userRef.set({
             credits: admin.firestore.FieldValue.increment(parseInt(credits))
         }, { merge: true });
 
+        // Plan subscription update
         if (plan) {
             let days = 0, planName = "";
             switch (plan) {
@@ -132,7 +140,7 @@ app.post("/api/payment-success", ensureAuthenticated, async (req, res) => {
     }
 });
 
-// ========== DAILY REWARD – FIXED ==========
+// ========== DAILY REWARD – FIXED (ensures document exists) ==========
 app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
     console.log("🔥 Daily reward endpoint hit");
     console.log("Request body:", req.body);
@@ -144,6 +152,11 @@ app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
 
         const userRef = db.collection("users").doc(userId);
         const userDoc = await userRef.get();
+
+        // Ensure the document exists before reading/writing
+        if (!userDoc.exists) {
+            await userRef.set({ credits: 20, createdAt: admin.firestore.FieldValue.serverTimestamp() });
+        }
 
         const now = Date.now();
         const lastClaim = userDoc.exists ? userDoc.data().lastDailyReward : null;
@@ -157,7 +170,7 @@ app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
             });
         }
 
-        // Update credits and last claim time
+        // Increment credits and update last claim time
         await userRef.set({
             credits: admin.firestore.FieldValue.increment(10),
             lastDailyReward: now
@@ -174,7 +187,6 @@ app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
         });
     } catch (error) {
         console.error("❌ Daily reward error:", error);
-        // Send the full error message to the frontend (only in development)
         res.status(500).json({ error: error.message, details: error.toString() });
     }
 });
