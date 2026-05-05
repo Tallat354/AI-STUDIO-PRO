@@ -344,7 +344,7 @@
                 credits = data.credits || 20;
                 subscription.plan = data.subscriptionPlan || "free";
                 subscription.expiry = data.subscriptionExpiry || null;
-                // Also save to localStorage for offline use
+                // Save to localStorage for offline use
                 localStorage.setItem(`credits_${uid}`, credits);
                 localStorage.setItem(`subscription_plan_${uid}`, subscription.plan);
                 if (subscription.expiry) localStorage.setItem(`subscription_expiry_${uid}`, subscription.expiry);
@@ -592,38 +592,35 @@
         }
     }
 
-    async function handlePaymentSuccess(plan) {
+    // === NEW: handle backend payment success ===
+    async function handlePaymentSuccess(creditsAmount, plan = null) {
         if (!currentUser) {
             console.error("No user logged in");
-            return;
+            return false;
         }
         try {
+            const body = {
+                userId: currentUser.uid,
+                credits: creditsAmount
+            };
+            if (plan) body.plan = plan;
+
             const res = await fetch(`${API_BASE}/payment-success`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
                     "Authorization": `Bearer ${idToken}`
                 },
-                body: JSON.stringify({
-                    userId: currentUser.uid,
-                    plan: plan
-                })
+                body: JSON.stringify(body)
             });
             const data = await res.json();
             if (!data.success) throw new Error(data.error);
-            console.log("Backend update successful:", data);
-            // Reload Firestore data to reflect updated credits/plan
-            await loadUserCreditsFromFirestore(currentUser.uid);
-            // Update local state that was maybe overwritten
-            credits = data.credits;
-            subscription.plan = data.plan;
-            subscription.expiry = data.expiresAt;
-            saveUserData();
-            updateUI();
-            showToast(`Subscription updated! +${data.credits} credits added.`);
+            console.log("Backend credits update successful:", data);
+            return true;
         } catch (err) {
-            console.error("Failed to update backend:", err);
+            console.error("Failed to update credits on backend:", err);
             showToast("Payment succeeded but failed to update credits. Please contact support.", true);
+            return false;
         }
     }
 
@@ -636,9 +633,21 @@
             showToast(error.message, true);
             document.getElementById("card-errors").innerText = error.message;
         } else if (paymentIntent.status === "succeeded") {
-            // Call backend to update Firestore
-            await handlePaymentSuccess(pendingPlan.plan);
-            // Clean up UI
+            // First, update backend Firestore
+            const updated = await handlePaymentSuccess(pendingPlan.creditsAmt, pendingPlan.plan);
+            if (updated) {
+                // Then update local state
+                credits += pendingPlan.creditsAmt;
+                subscription.plan = pendingPlan.plan;
+                const expiry = new Date();
+                if (pendingPlan.plan === "weekly") expiry.setDate(expiry.getDate() + 7);
+                else if (pendingPlan.plan === "15days") expiry.setDate(expiry.getDate() + 15);
+                else if (pendingPlan.plan === "monthly") expiry.setMonth(expiry.getMonth() + 1);
+                subscription.expiry = expiry.toISOString();
+                saveUserData();
+                updateUI();
+                showToast(`Payment successful! +${pendingPlan.creditsAmt} credits added.`);
+            }
             document.getElementById("paymentModal").classList.remove("active");
             if (card) card.clear();
             pendingPlan = null;
@@ -753,12 +762,10 @@
         currentUser = user;
         if (user) {
             idToken = await user.getIdToken();
-            // Ensure Firestore has basic user info
             await saveUserToFirestore(user);
-            // Load credits and subscription from Firestore
             await loadUserCreditsFromFirestore(user.uid);
             updateNavbarAfterLogin(user);
-            loadUserData(); // this will now have the updated credits from Firestore
+            loadUserData();
             closeAuthModal();
         } else {
             idToken = null;
