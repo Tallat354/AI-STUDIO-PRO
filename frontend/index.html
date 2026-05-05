@@ -7,7 +7,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
-        /* All your CSS – keep exactly as before (CSS unchanged) */
+        /* Your existing CSS – exactly the same as before; no changes needed for style */
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Inter', sans-serif;
@@ -150,7 +150,8 @@
 </head>
 <body>
 <div style="max-width: 1300px; margin: 0 auto;">
-    <!-- Navbar (unchanged) -->
+    <!-- Navbar, Tabs, Generate/Edit/Gallery/Dashboard – all your existing HTML goes here unchanged -->
+    <!-- I'll put only the necessary content to be compact; you can reuse your full HTML -->
     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; margin-bottom: 2rem;">
         <div style="display: flex; align-items: center; gap: 12px;">
             <div style="width: 44px; height: 44px; background: linear-gradient(135deg, #3b82f6, #a855f7); border-radius: 18px; display: flex; align-items: center; justify-content: center;"><i class="fas fa-brain"></i></div>
@@ -163,7 +164,6 @@
         </div>
     </div>
 
-    <!-- Tabs -->
     <div class="tabs">
         <button class="tab active" data-tab="generate">🎨 Generate</button>
         <button class="tab" data-tab="edit">✏️ Edit / Face</button>
@@ -171,10 +171,8 @@
         <button class="tab" data-tab="dashboard">📊 Dashboard</button>
     </div>
 
-    <!-- Generate Tab (unchanged) -->
     <div id="generateTab" class="tab-pane">
-        <div class="glass-card" style="padding: 1.8rem;">
-            <h3>✨ Text‑to‑Image (Flux Dev)</h3>
+        <div class="glass-card" style="padding: 1.8rem;"><h3>✨ Text‑to‑Image (Flux Dev)</h3>
             <textarea id="genPrompt" rows="3" class="premium-textarea" placeholder="A warrior woman with glowing eyes, fantasy armor, 8k, cinematic"></textarea>
             <input id="negPrompt" class="premium-input" placeholder="Negative prompt (blurry, ugly)">
             <div class="style-grid" id="styleGrid">
@@ -191,10 +189,8 @@
         <div id="genResult" style="display:none; text-align:center;"><img id="genImage" class="result-img"><br><button id="downloadGenBtn" class="btn-secondary">Download</button> <button id="saveGenBtn" class="btn-secondary">Save to gallery</button></div>
     </div>
 
-    <!-- Edit Tab -->
     <div id="editTab" class="tab-pane" style="display:none;">
-        <div class="glass-card" style="padding:1.8rem;">
-            <h3>🖌️ Face‑preserving editor</h3>
+        <div class="glass-card" style="padding:1.8rem;"><h3>🖌️ Face‑preserving editor</h3>
             <div id="uploadZone" class="upload-zone"><i class="fas fa-cloud-upload-alt"></i><p>Click or drag image here</p><input type="file" id="editUpload" accept="image/*" style="display:none;"></div>
             <div id="editPreview" style="margin:1rem 0;"></div>
             <textarea id="editPrompt" rows="2" class="premium-textarea" placeholder="Describe edit (e.g., 'make her smile', 'change hair to curly')"></textarea>
@@ -204,12 +200,10 @@
         <div id="editResult" style="display:none; text-align:center;"><img id="editResultImg" class="result-img"><br><button id="downloadEditBtn" class="btn-secondary">Download</button> <button id="saveEditBtn" class="btn-secondary">Save to gallery</button></div>
     </div>
 
-    <!-- Gallery Tab -->
     <div id="galleryTab" class="tab-pane" style="display:none;">
         <div class="glass-card" style="padding:1.8rem;"><h3>🖼️ Your gallery</h3><div id="galleryContainer" class="gallery-grid"><p>No saved images</p></div></div>
     </div>
 
-    <!-- Dashboard Tab -->
     <div id="dashboardTab" class="tab-pane" style="display:none;">
         <div class="glass-card" style="padding:1.8rem;">
             <h3>📈 Dashboard</h3>
@@ -300,7 +294,7 @@
     import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut, updateProfile, sendPasswordResetEmail } from "firebase/auth";
     import { getFirestore, doc, getDoc, setDoc, updateDoc, increment, serverTimestamp } from "firebase/firestore";
 
-    // ✅ BACKEND URL (same as the host – relative path works because both frontend and backend are served from the same origin)
+    // ✅ Because frontend and backend are served from the same origin, API_BASE is relative
     const API_BASE = "/api";
 
     const firebaseConfig = {
