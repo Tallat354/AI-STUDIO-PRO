@@ -38,7 +38,32 @@ try {
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 
-app.use(cors({ origin: true, credentials: true }));
+// ========== CORS CONFIGURATION (FIX) ==========
+const allowedOrigins = [
+    'https://ai-studio-pro-iquw.onrender.com',  // Your frontend on Render
+    'http://localhost:3000',
+    'http://localhost:5500',
+    'http://127.0.0.1:5500'
+];
+app.use(cors({
+    origin: function (origin, callback) {
+        // Allow requests with no origin (like mobile apps or curl)
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.indexOf(origin) !== -1) {
+            callback(null, true);
+        } else {
+            console.log("Blocked by CORS:", origin);
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+// Handle preflight requests (automatically handled by cors middleware)
+app.options('*', cors());
+
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -125,7 +150,7 @@ app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
     }
 });
 
-// ========== AI ENDPOINTS ==========
+// ========== AI ENDPOINTS (unchanged) ==========
 function shouldPreserveHairstyle(promptText) {
     const lower = promptText.toLowerCase();
     const changeKeywords = ["change hair", "different hair", "new hair", "different hairstyle", "new hairstyle", "change hairstyle", "alter hair", "modify hair", "different haircut", "new haircut"];
@@ -180,10 +205,10 @@ app.post("/api/edit", ensureAuthenticated, upload.single("image"), async (req, r
     }
 });
 
-// Serve frontend (adjust path as needed)
+// ========== SERVE FRONTEND (if needed) – optional ==========
 app.use(express.static(path.join(__dirname, "..", "frontend")));
 app.get("*", (req, res) => {
     res.sendFile(path.join(__dirname, "..", "frontend", "index.html"));
 });
 
-app.listen(PORT, () => console.log(`🚀 Backend running on http://localhost:${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Backend running on http://localhost:${PORT} and CORS enabled for frontend`));
