@@ -62,7 +62,7 @@ async function ensureAuthenticated(req, res, next) {
     }
 }
 
-// ---------- Stripe routes ----------
+// ========== STRIPE ROUTES ==========
 app.get("/api/stripe-key", (req, res) => {
     res.json({ publishableKey: STRIPE_PUBLISHABLE_KEY });
 });
@@ -93,16 +93,12 @@ app.post("/api/payment-success", ensureAuthenticated, async (req, res) => {
         const { userId, credits, plan } = req.body;
 
         if (!userId) {
-            console.error("Missing userId");
             return res.status(400).json({ error: "Missing userId" });
         }
-
         if (!credits || isNaN(credits)) {
-            console.error("Invalid credits amount");
             return res.status(400).json({ error: "Invalid credits amount" });
         }
 
-        // Calculate expiry if plan is provided
         let days = 0;
         let planName = null;
         if (plan) {
@@ -135,6 +131,49 @@ app.post("/api/payment-success", ensureAuthenticated, async (req, res) => {
     } catch (error) {
         console.error("Payment success update error:", error);
         res.status(500).json({ error: "Failed to update user credits", details: error.message });
+    }
+});
+
+// ========== DAILY REWARD ==========
+app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
+    try {
+        const { userId } = req.body;
+        if (!userId) {
+            return res.status(400).json({ error: "Missing userId" });
+        }
+
+        const userRef = db.collection("users").doc(userId);
+        const userDoc = await userRef.get();
+
+        const now = Date.now();
+        const lastClaim = userDoc.exists ? userDoc.data().lastDailyReward : null;
+        const oneDay = 24 * 60 * 60 * 1000;
+
+        if (lastClaim && (now - lastClaim) < oneDay) {
+            const hoursLeft = Math.ceil((oneDay - (now - lastClaim)) / (60 * 60 * 1000));
+            return res.status(400).json({
+                error: `Already claimed today! Next reward in ${hoursLeft} hours.`,
+                alreadyClaimed: true
+            });
+        }
+
+        // Update credits and last claim time
+        await userRef.set({
+            credits: admin.firestore.FieldValue.increment(10),
+            lastDailyReward: now
+        }, { merge: true });
+
+        const updatedDoc = await userRef.get();
+        const newCredits = updatedDoc.data().credits;
+
+        res.json({
+            success: true,
+            message: "+10 credits added!",
+            newCredits: newCredits
+        });
+    } catch (error) {
+        console.error("Daily reward error:", error);
+        res.status(500).json({ error: "Failed to claim daily reward" });
     }
 });
 
@@ -195,7 +234,7 @@ app.post("/api/edit", ensureAuthenticated, upload.single("image"), async (req, r
     }
 });
 
-// Serve frontend
+// ========== Serve frontend ==========
 app.use(express.static(path.join(__dirname, "..", "frontend")));
 app.get("*", (req, res) => {
     res.sendFile(path.join(__dirname, "..", "frontend", "index.html"));
