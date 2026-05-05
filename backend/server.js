@@ -20,10 +20,9 @@ console.log("Stripe keys loaded:", !!STRIPE_PUBLISHABLE_KEY, !!STRIPE_SECRET_KEY
 const stripe = new Stripe(STRIPE_SECRET_KEY);
 fal.config({ credentials: process.env.FAL_KEY });
 
-// ========== FIREBASE ADMIN (FIXED) ==========
+// ---------- Firebase Admin ----------
 let db = null;
 try {
-    // Parse FIREBASE_CONFIG from .env (it must be a valid JSON string)
     const firebaseConfig = JSON.parse(process.env.FIREBASE_CONFIG);
     if (firebaseConfig && firebaseConfig.project_id) {
         if (!admin.apps.length) {
@@ -96,19 +95,15 @@ app.post("/api/payment-success", ensureAuthenticated, async (req, res) => {
 
     try {
         const { userId, credits, plan } = req.body;
-        if (!userId) {
-            return res.status(400).json({ error: "Missing userId" });
-        }
-        if (!credits || isNaN(credits)) {
-            return res.status(400).json({ error: "Invalid credits amount" });
+        if (!userId || !credits || isNaN(credits)) {
+            return res.status(400).json({ error: "Missing userId or invalid credits" });
         }
 
         const userRef = db.collection("users").doc(userId);
         const updateData = {
-            credits: admin.firestore.FieldValue.increment(credits)
+            credits: admin.firestore.FieldValue.increment(parseInt(credits))
         };
 
-        // If plan is provided, also update subscription info
         if (plan) {
             let days = 0;
             let planName = "";
@@ -128,16 +123,20 @@ app.post("/api/payment-success", ensureAuthenticated, async (req, res) => {
         updateData.lastUpdated = admin.firestore.FieldValue.serverTimestamp();
 
         await userRef.set(updateData, { merge: true });
-        console.log(`✅ Updated user ${userId}: +${credits} credits${plan ? `, plan ${plan}` : ""}`);
 
-        res.json({ success: true, message: "Credits updated successfully" });
+        // Fetch updated credits to return
+        const updatedDoc = await userRef.get();
+        const newCredits = updatedDoc.data().credits;
+
+        console.log(`✅ Updated user ${userId}: +${credits} credits, new total: ${newCredits}`);
+        res.json({ success: true, newCredits: newCredits });
     } catch (error) {
         console.error("Payment success update error:", error);
         res.status(500).json({ error: "Failed to update user credits", details: error.message });
     }
 });
 
-// ========== DAILY REWARD – FIXED ==========
+// ========== DAILY REWARD – FIXED (persists in Firestore) ==========
 app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
     try {
         const { userId } = req.body;
@@ -160,7 +159,7 @@ app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
             });
         }
 
-        // Update credits and last claim time
+        // Increment credits AND store last claim time
         await userRef.set({
             credits: admin.firestore.FieldValue.increment(10),
             lastDailyReward: now
@@ -169,6 +168,7 @@ app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
         const updatedDoc = await userRef.get();
         const newCredits = updatedDoc.data().credits;
 
+        console.log(`✅ Daily reward claimed for ${userId}: +10 credits, total: ${newCredits}`);
         res.json({
             success: true,
             message: "+10 credits added!",
