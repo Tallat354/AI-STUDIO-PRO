@@ -7,7 +7,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
-        /* All CSS – exactly as before, no changes */
+        /* All CSS – same as before, no changes */
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Inter', sans-serif;
@@ -150,7 +150,7 @@
 </head>
 <body>
 <div style="max-width: 1300px; margin: 0 auto;">
-    <!-- Navbar -->
+    <!-- Navbar, Tabs, Generate/Edit/Gallery/Dashboard – same structure as before -->
     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; margin-bottom: 2rem;">
         <div style="display: flex; align-items: center; gap: 12px;">
             <div style="width: 44px; height: 44px; background: linear-gradient(135deg, #3b82f6, #a855f7); border-radius: 18px; display: flex; align-items: center; justify-content: center;"><i class="fas fa-brain"></i></div>
@@ -163,7 +163,6 @@
         </div>
     </div>
 
-    <!-- Tabs -->
     <div class="tabs">
         <button class="tab active" data-tab="generate">🎨 Generate</button>
         <button class="tab" data-tab="edit">✏️ Edit / Face</button>
@@ -171,7 +170,6 @@
         <button class="tab" data-tab="dashboard">📊 Dashboard</button>
     </div>
 
-    <!-- Generate Tab -->
     <div id="generateTab" class="tab-pane">
         <div class="glass-card" style="padding: 1.8rem;">
             <h3>✨ Text‑to‑Image (Flux Dev)</h3>
@@ -191,7 +189,6 @@
         <div id="genResult" style="display:none; text-align:center;"><img id="genImage" class="result-img"><br><button id="downloadGenBtn" class="btn-secondary">Download</button> <button id="saveGenBtn" class="btn-secondary">Save to gallery</button></div>
     </div>
 
-    <!-- Edit Tab -->
     <div id="editTab" class="tab-pane" style="display:none;">
         <div class="glass-card" style="padding:1.8rem;">
             <h3>🖌️ Face‑preserving editor</h3>
@@ -204,12 +201,10 @@
         <div id="editResult" style="display:none; text-align:center;"><img id="editResultImg" class="result-img"><br><button id="downloadEditBtn" class="btn-secondary">Download</button> <button id="saveEditBtn" class="btn-secondary">Save to gallery</button></div>
     </div>
 
-    <!-- Gallery Tab -->
     <div id="galleryTab" class="tab-pane" style="display:none;">
         <div class="glass-card" style="padding:1.8rem;"><h3>🖼️ Your gallery</h3><div id="galleryContainer" class="gallery-grid"><p>No saved images</p></div></div>
     </div>
 
-    <!-- Dashboard Tab -->
     <div id="dashboardTab" class="tab-pane" style="display:none;">
         <div class="glass-card" style="padding:1.8rem;">
             <h3>📈 Dashboard</h3>
@@ -237,15 +232,8 @@
         <div id="loginForm">
             <input type="email" id="loginEmail" class="premium-input" placeholder="Email" style="margin:1rem 0 0.5rem;">
             <input type="password" id="loginPassword" class="premium-input" placeholder="Password">
-            <div style="display:flex; justify-content:space-between; margin:0.5rem 0;">
-                <label><input type="checkbox" id="rememberMe"> Remember me</label>
-                <a href="#" id="forgotPasswordLink" style="color:#a855f7;">Forgot password?</a>
-            </div>
-            <div id="forgotPasswordForm" style="display: none; margin-top: 12px;">
-                <input type="email" id="resetEmail" class="premium-input" placeholder="Enter your email" style="margin-bottom: 8px;">
-                <button id="sendResetBtn" class="btn-secondary" style="width: 100%;">Send reset email</button>
-                <button id="cancelResetBtn" class="btn-secondary" style="width: 100%; margin-top: 4px;">Cancel</button>
-            </div>
+            <div style="display:flex; justify-content:space-between; margin:0.5rem 0;"><label><input type="checkbox" id="rememberMe"> Remember me</label><a href="#" id="forgotPasswordLink" style="color:#a855f7;">Forgot password?</a></div>
+            <div id="forgotPasswordForm" style="display: none; margin-top: 12px;"><input type="email" id="resetEmail" class="premium-input" placeholder="Enter your email" style="margin-bottom: 8px;"><button id="sendResetBtn" class="btn-secondary" style="width: 100%;">Send reset email</button><button id="cancelResetBtn" class="btn-secondary" style="width: 100%; margin-top: 4px;">Cancel</button></div>
             <button id="doLoginBtn" class="btn-primary" style="width:100%;">Sign In</button>
             <div style="text-align:center; margin:1rem 0;">or</div>
             <button id="googleSignInBtn" class="btn-secondary" style="display:flex; align-items:center; justify-content:center; gap:8px; width:100%;"><i class="fab fa-google"></i> Continue with Google</button>
@@ -265,23 +253,16 @@
     </div>
 </div>
 
-<!-- Payment Modal (Stripe Elements) -->
+<!-- Payment Modal -->
 <div id="paymentModal" class="modal-overlay">
     <div class="modal-content" style="text-align: left;">
         <h3>💳 Secure Checkout</h3>
-        <div id="paymentSummary" style="background:#0f172a; border-radius:1rem; padding:0.8rem; margin:1rem 0;">
-            <div><strong>Plan:</strong> <span id="paymentPlanName"></span></div>
-            <div><strong>Credits:</strong> <span id="paymentCredits"></span></div>
-            <div><strong>Total:</strong> $<span id="paymentAmount"></span></div>
-        </div>
+        <div id="paymentSummary" style="background:#0f172a; border-radius:1rem; padding:0.8rem; margin:1rem 0;"><div><strong>Plan:</strong> <span id="paymentPlanName"></span></div><div><strong>Credits:</strong> <span id="paymentCredits"></span></div><div><strong>Total:</strong> $<span id="paymentAmount"></span></div></div>
         <div id="card-element" class="premium-input" style="padding:0.75rem;"></div>
         <div id="card-errors" role="alert" style="color: #f87171; font-size: 0.8rem; margin-top: 0.5rem;"></div>
         <button id="confirmPaymentBtn" class="btn-primary" style="width:100%; margin-top:1rem;">Pay now</button>
         <button id="cancelPaymentBtn" class="btn-secondary" style="width:100%; margin-top:0.5rem;">Cancel</button>
-        <div style="display:flex; gap:0.8rem; justify-content:center; margin-top:1rem;">
-            <button id="applePayMock" class="btn-secondary" style="flex:1;"><i class="fab fa-apple-pay"></i> Apple Pay</button>
-            <button id="googlePayMock" class="btn-secondary" style="flex:1;"><i class="fab fa-google-pay"></i> Google Pay</button>
-        </div>
+        <div style="display:flex; gap:0.8rem; justify-content:center; margin-top:1rem;"><button id="applePayMock" class="btn-secondary" style="flex:1;"><i class="fab fa-apple-pay"></i> Apple Pay</button><button id="googlePayMock" class="btn-secondary" style="flex:1;"><i class="fab fa-google-pay"></i> Google Pay</button></div>
     </div>
 </div>
 
@@ -300,7 +281,7 @@
     import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut, updateProfile, sendPasswordResetEmail } from "firebase/auth";
     import { getFirestore, doc, getDoc, setDoc, updateDoc, increment, serverTimestamp } from "firebase/firestore";
 
-    // 👇 IMPORTANT: CHANGE THIS TO YOUR RENDER BACKEND URL
+    // 👇 YAHI SAHI HAI – TUMHARA BACKEND URL
     const API_BASE = "https://ai-studio-pro-lquw.onrender.com/api";
 
     const firebaseConfig = {
@@ -314,7 +295,7 @@
 
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
-    const db = getFirestore(app);
+    const db = getFirestore(app);   // database "mydata" nahi hai – default use karo
 
     let currentUser = null;
     let idToken = null;
@@ -326,11 +307,7 @@
     let currentEditImg = null;
     let activeStyle = "realistic";
     let subscription = { plan: "free", expiry: null };
-    let stripe = null;
-    let elements = null;
-    let card = null;
-    let clientSecret = null;
-    let pendingPlan = null;
+    let stripe = null, elements = null, card = null, clientSecret = null, pendingPlan = null;
 
     function showToast(msg, isErr = false) {
         const toast = document.createElement("div");
@@ -345,15 +322,10 @@
         const userRef = doc(db, "users", user.uid);
         const snap = await getDoc(userRef);
         if (snap.exists()) {
-            const data = snap.data();
-            credits = data.credits || 20;
-            lastDaily = data.lastDailyClaim;
+            credits = snap.data().credits || 20;
+            lastDaily = snap.data().lastDailyClaim;
         } else {
-            await setDoc(userRef, {
-                credits: 20,
-                lastDailyClaim: null,
-                createdAt: serverTimestamp()
-            });
+            await setDoc(userRef, { credits: 20, lastDailyClaim: null, createdAt: serverTimestamp() });
             credits = 20;
         }
         updateUI();
@@ -361,19 +333,13 @@
 
     async function syncCreditsFromFirestore() {
         if (!currentUser) return;
-        const userRef = doc(db, "users", currentUser.uid);
-        const snap = await getDoc(userRef);
-        if (snap.exists()) {
-            credits = snap.data().credits || 20;
-            updateUI();
-        }
+        const snap = await getDoc(doc(db, "users", currentUser.uid));
+        if (snap.exists()) credits = snap.data().credits || 20;
+        updateUI();
     }
 
     async function claimDaily() {
-        if (!currentUser) {
-            showToast("Please sign in first", true);
-            return;
-        }
+        if (!currentUser) { showToast("Please sign in first", true); return; }
         const token = await currentUser.getIdToken();
         try {
             const res = await fetch(`${API_BASE}/daily-reward`, {
@@ -390,7 +356,7 @@
                 showToast(data.error, true);
             }
         } catch (err) {
-            console.error("Daily reward error:", err);
+            console.error(err);
             showToast("Failed to claim daily reward", true);
         }
     }
@@ -406,54 +372,38 @@
                 card = elements.create("card", { style: { base: { color: "#fff", fontSize: "16px" } } });
                 card.mount("#card-element");
                 card.addEventListener("change", (event) => {
-                    const displayError = document.getElementById("card-errors");
-                    displayError.textContent = event.error ? event.error.message : "";
+                    document.getElementById("card-errors").textContent = event.error ? event.error.message : "";
                 });
-                console.log("✅ Stripe initialized");
             }
-        } catch (err) {
-            console.error("Stripe init failed", err);
-            showToast("Payment system unavailable", true);
-        }
+        } catch (err) { console.error(err); showToast("Payment system unavailable", true); }
     }
 
     async function showPaymentModal(plan, creditsAmt, price) {
         if (!stripe) await initStripe();
         if (!stripe) { showToast("Payment system unavailable", true); return; }
         if (!currentUser) { showToast("Please sign in first", true); openAuthModal(); return; }
-
         pendingPlan = { plan, creditsAmt, price };
         document.getElementById("paymentPlanName").innerText = plan.charAt(0).toUpperCase() + plan.slice(1);
         document.getElementById("paymentCredits").innerText = creditsAmt;
         document.getElementById("paymentAmount").innerText = price;
-
         const token = await currentUser.getIdToken();
-        try {
-            const res = await fetch(`${API_BASE}/create-payment-intent`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-                body: JSON.stringify({ amount: price, credits: creditsAmt, planName: plan })
-            });
-            const data = await res.json();
-            if (data.clientSecret) {
-                clientSecret = data.clientSecret;
-                document.getElementById("paymentModal").classList.add("active");
-            } else {
-                throw new Error(data.error || "No client secret");
-            }
-        } catch (err) {
-            console.error("Payment intent error:", err);
-            showToast("Failed to initiate payment: " + err.message, true);
-        }
+        const res = await fetch(`${API_BASE}/create-payment-intent`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+            body: JSON.stringify({ amount: price, credits: creditsAmt, planName: plan })
+        });
+        const data = await res.json();
+        if (data.clientSecret) {
+            clientSecret = data.clientSecret;
+            document.getElementById("paymentModal").classList.add("active");
+        } else showToast("Failed to initiate payment", true);
     }
 
     async function confirmPayment() {
         if (!stripe || !clientSecret) return;
-        const { error, paymentIntent } = await stripe.confirmCardPayment(clientSecret, { payment_method: { card: card } });
-        if (error) {
-            showToast(error.message, true);
-            document.getElementById("card-errors").innerText = error.message;
-        } else if (paymentIntent.status === "succeeded") {
+        const { error, paymentIntent } = await stripe.confirmCardPayment(clientSecret, { payment_method: { card } });
+        if (error) showToast(error.message, true);
+        else if (paymentIntent.status === "succeeded") {
             credits += pendingPlan.creditsAmt;
             subscription.plan = pendingPlan.plan;
             const expiry = new Date();
@@ -469,7 +419,6 @@
             document.getElementById("paymentModal").classList.remove("active");
             if (card) card.clear();
             pendingPlan = null;
-            clientSecret = null;
         }
     }
 
@@ -494,11 +443,7 @@
         const dailyBtn = document.getElementById("dailyRewardBtn");
         if (!dailyBtn) return;
         let timerSpan = document.getElementById("dailyTimer");
-        if (!timerSpan) {
-            timerSpan = document.createElement("span");
-            timerSpan.id = "dailyTimer";
-            dailyBtn.appendChild(timerSpan);
-        }
+        if (!timerSpan) { timerSpan = document.createElement("span"); timerSpan.id = "dailyTimer"; dailyBtn.appendChild(timerSpan); }
         if (lastDaily && (Date.now() - new Date(lastDaily).getTime()) < 86400000) {
             const hoursLeft = Math.ceil((86400000 - (Date.now() - new Date(lastDaily).getTime())) / 3600000);
             timerSpan.innerText = `(${hoursLeft}h left)`;
@@ -530,15 +475,8 @@
         try {
             const userCred = await createUserWithEmailAndPassword(auth, email, password);
             await updateProfile(userCred.user, { displayName: `${first} ${last}` });
-            const userRef = doc(db, "users", userCred.user.uid);
-            await setDoc(userRef, {
-                firstName: first,
-                lastName: last,
-                email: email,
-                uid: userCred.user.uid,
-                photoURL: "",
-                credits: 20,
-                createdAt: serverTimestamp()
+            await setDoc(doc(db, "users", userCred.user.uid), {
+                firstName: first, lastName: last, email, uid: userCred.user.uid, photoURL: "", credits: 20, createdAt: serverTimestamp()
             });
             showToast("Signup Successful ✅");
             closeAuthModal();
@@ -562,14 +500,7 @@
             await signInWithPopup(auth, provider);
             showToast("Google Login Successful ✅");
             closeAuthModal();
-        } catch (err) {
-            if (err.code === "auth/operation-not-allowed") {
-                showToast("Google Sign-In not enabled in Firebase Console.", true);
-            } else {
-                showToast(err.message, true);
-            }
-            document.getElementById("googleErrorMsg").innerText = err.message;
-        }
+        } catch (err) { showToast(err.message, true); }
     }
 
     async function logout() {
@@ -602,11 +533,7 @@
         if (!idToken) throw new Error("No auth token");
         const headers = { ...options.headers, "Authorization": `Bearer ${idToken}` };
         const res = await fetch(`${API_BASE}${url}`, { ...options, headers });
-        if (res.status === 401) {
-            showToast("Session expired, please login again", true);
-            logout();
-            throw new Error("Unauthorized");
-        }
+        if (res.status === 401) { showToast("Session expired", true); logout(); throw new Error("Unauthorized"); }
         return res;
     }
 
@@ -629,16 +556,12 @@
             document.getElementById("genImage").src = currentGenImage;
             credits--;
             totalGenerations++;
-            const userRef = doc(db, "users", currentUser.uid);
-            await updateDoc(userRef, { credits: increment(-1) });
+            await updateDoc(doc(db, "users", currentUser.uid), { credits: increment(-1) });
             updateUI();
             document.getElementById("genLoader").style.display = "none";
             document.getElementById("genResult").style.display = "block";
             showToast("Generated!");
-        } catch (err) {
-            showToast(err.message, true);
-            document.getElementById("genLoader").style.display = "none";
-        }
+        } catch (err) { showToast(err.message, true); document.getElementById("genLoader").style.display = "none"; }
     }
 
     async function editImage() {
@@ -659,16 +582,12 @@
             currentEditImg = data.imageUrl;
             document.getElementById("editResultImg").src = currentEditImg;
             credits -= 2;
-            const userRef = doc(db, "users", currentUser.uid);
-            await updateDoc(userRef, { credits: increment(-2) });
+            await updateDoc(doc(db, "users", currentUser.uid), { credits: increment(-2) });
             updateUI();
             document.getElementById("editLoader").style.display = "none";
             document.getElementById("editResult").style.display = "block";
             showToast("Edited (face preserved)");
-        } catch (err) {
-            showToast(err.message, true);
-            document.getElementById("editLoader").style.display = "none";
-        }
+        } catch (err) { showToast(err.message, true); document.getElementById("editLoader").style.display = "none"; }
     }
 
     async function enhancePrompt() {
@@ -693,10 +612,7 @@
     function renderGallery() {
         const container = document.getElementById("galleryContainer");
         if (!container) return;
-        if (!gallery.length) {
-            container.innerHTML = "<p style='text-align:center'>No saved images</p>";
-            return;
-        }
+        if (!gallery.length) { container.innerHTML = "<p style='text-align:center'>No saved images</p>"; return; }
         container.innerHTML = "";
         gallery.forEach(imgUrl => {
             const div = document.createElement("div");
@@ -722,8 +638,7 @@
             idToken = await user.getIdToken();
             await loadUserFromFirestore(user);
             const savedGallery = localStorage.getItem(`gallery_${user.uid}`);
-            if (savedGallery) gallery = JSON.parse(savedGallery);
-            else gallery = [];
+            gallery = savedGallery ? JSON.parse(savedGallery) : [];
             totalGenerations = parseInt(localStorage.getItem(`total_generations_${user.uid}`) || "0");
             updateNavbarAfterLogin(user);
             renderGallery();
@@ -767,9 +682,7 @@
                     };
                     document.addEventListener("click", closeHandler);
                 }, 100);
-            } else {
-                openAuthModal();
-            }
+            } else openAuthModal();
         });
 
         document.getElementById("closeAuthBtn")?.addEventListener("click", closeAuthModal);
