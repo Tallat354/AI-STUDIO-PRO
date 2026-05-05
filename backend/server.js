@@ -13,9 +13,17 @@ const Stripe = require("stripe");
 
 const app = express();
 
-// ========== CORS – ALLOW ANY ORIGIN (for localhost testing) ==========
+// ========== CORS – YE FIX HAI ==========
+app.use((req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+    res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    if (req.method === "OPTIONS") {
+        return res.sendStatus(200);
+    }
+    next();
+});
 app.use(cors({ origin: "*", methods: ["GET", "POST", "OPTIONS"], allowedHeaders: ["Content-Type", "Authorization"] }));
-// Explicitly handle OPTIONS preflight requests
 app.options('*', cors());
 
 const PORT = process.env.PORT || 3000;
@@ -26,7 +34,6 @@ if (!STRIPE_SECRET_KEY) console.error("❌ STRIPE_SECRET_KEY missing");
 const stripe = new Stripe(STRIPE_SECRET_KEY);
 fal.config({ credentials: process.env.FAL_KEY });
 
-// Firebase Admin – using default database (no "mydata")
 let db = null;
 try {
     const firebaseConfig = JSON.parse(process.env.FIREBASE_CONFIG);
@@ -60,25 +67,9 @@ async function ensureAuthenticated(req, res, next) {
     }
 }
 
-// ========== Stripe ==========
+// ========== Stripe key ==========
 app.get("/api/stripe-key", (req, res) => {
     res.json({ publishableKey: STRIPE_PUBLISHABLE_KEY });
-});
-
-app.post("/api/create-payment-intent", ensureAuthenticated, async (req, res) => {
-    try {
-        const { amount, credits, planName } = req.body;
-        const paymentIntent = await stripe.paymentIntents.create({
-            amount: Math.round(amount * 100),
-            currency: "usd",
-            payment_method_types: ['card'],
-            metadata: { credits, planName, userId: req.user.uid }
-        });
-        res.json({ clientSecret: paymentIntent.client_secret });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: err.message });
-    }
 });
 
 // ========== Daily reward ==========
@@ -111,7 +102,24 @@ app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
     }
 });
 
-// ========== AI endpoints (unchanged) ==========
+// ========== Payment intent ==========
+app.post("/api/create-payment-intent", ensureAuthenticated, async (req, res) => {
+    try {
+        const { amount, credits, planName } = req.body;
+        const paymentIntent = await stripe.paymentIntents.create({
+            amount: Math.round(amount * 100),
+            currency: "usd",
+            payment_method_types: ['card'],
+            metadata: { credits, planName, userId: req.user.uid }
+        });
+        res.json({ clientSecret: paymentIntent.client_secret });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ========== AI endpoints (unchanged – your existing code) ==========
 function shouldPreserveHairstyle(promptText) {
     const lower = promptText.toLowerCase();
     const changeKeywords = ["change hair", "different hair", "new hair", "different hairstyle", "new hairstyle", "change hairstyle", "alter hair", "modify hair", "different haircut", "new haircut"];
@@ -166,7 +174,7 @@ app.post("/api/edit", ensureAuthenticated, upload.single("image"), async (req, r
     }
 });
 
-// Serve static frontend (optional, if you want to serve from same backend)
+// Serve static frontend (optional)
 app.use(express.static(path.join(__dirname, "..", "frontend")));
 app.get("*", (req, res) => {
     res.sendFile(path.join(__dirname, "..", "frontend", "index.html"));
