@@ -20,7 +20,7 @@ console.log("Stripe keys loaded:", !!STRIPE_PUBLISHABLE_KEY, !!STRIPE_SECRET_KEY
 const stripe = new Stripe(STRIPE_SECRET_KEY);
 fal.config({ credentials: process.env.FAL_KEY });
 
-// Firebase Admin
+// ---------- Firebase Admin ----------
 let db = null;
 try {
     const firebaseConfig = JSON.parse(process.env.FIREBASE_CONFIG);
@@ -28,9 +28,11 @@ try {
         admin.initializeApp({ credential: admin.credential.cert(firebaseConfig) });
         db = admin.firestore();
         console.log("✅ Firebase Admin connected to Firestore");
+    } else {
+        console.warn("⚠️ Invalid FIREBASE_CONFIG – token verification will fail");
     }
 } catch (err) {
-    console.warn("⚠️ Firebase Admin not configured", err.message);
+    console.warn("⚠️ FIREBASE_CONFIG parse error – token verification will fail", err.message);
 }
 
 const app = express();
@@ -40,7 +42,7 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// Auth middleware
+// ---------- Auth middleware ----------
 async function ensureAuthenticated(req, res, next) {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -60,7 +62,7 @@ async function ensureAuthenticated(req, res, next) {
     }
 }
 
-// ========== STRIPE ROUTES ==========
+// ---------- Stripe routes ----------
 app.get("/api/stripe-key", (req, res) => {
     res.json({ publishableKey: STRIPE_PUBLISHABLE_KEY });
 });
@@ -84,63 +86,66 @@ app.post("/api/create-payment-intent", ensureAuthenticated, async (req, res) => 
 
 // ========== PAYMENT SUCCESS – UPDATE FIRESTORE ==========
 app.post("/api/payment-success", ensureAuthenticated, async (req, res) => {
+    console.log("🔥 Payment success endpoint hit");
+    console.log("Request body:", req.body);
+
     try {
-        const { userId, plan } = req.body;
-        if (!userId || !plan) {
-            return res.status(400).json({ error: "Missing userId or plan" });
+        const { userId, credits, plan } = req.body;
+
+        if (!userId) {
+            console.error("Missing userId");
+            return res.status(400).json({ error: "Missing userId" });
         }
 
-        let credits = 0;
+        if (!credits || isNaN(credits)) {
+            console.error("Invalid credits amount");
+            return res.status(400).json({ error: "Invalid credits amount" });
+        }
+
+        // Calculate expiry if plan is provided
         let days = 0;
-        let planName = "";
-
-        switch (plan) {
-            case "weekly":
-                credits = 500;
-                days = 7;
-                planName = "weekly";
-                break;
-            case "15days":
-                credits = 1000;
-                days = 15;
-                planName = "15days";
-                break;
-            case "monthly":
-                credits = 2500;
-                days = 30;
-                planName = "monthly";
-                break;
-            default:
-                return res.status(400).json({ error: "Invalid plan" });
+        let planName = null;
+        if (plan) {
+            switch (plan) {
+                case "weekly": days = 7; planName = "weekly"; break;
+                case "15days": days = 15; planName = "15days"; break;
+                case "monthly": days = 30; planName = "monthly"; break;
+                default: break;
+            }
         }
-
-        const expiresAt = new Date();
-        expiresAt.setDate(expiresAt.getDate() + days);
 
         const userRef = db.collection("users").doc(userId);
-        await userRef.set({
-            credits: credits,
-            subscriptionPlan: planName,
-            subscriptionExpiry: expiresAt,
-            lastUpdated: admin.firestore.FieldValue.serverTimestamp()
-        }, { merge: true });
+        const updateData = {
+            credits: admin.firestore.FieldValue.increment(credits)
+        };
+        if (planName && days > 0) {
+            const expiresAt = new Date();
+            expiresAt.setDate(expiresAt.getDate() + days);
+            updateData.subscriptionPlan = planName;
+            updateData.subscriptionExpiry = expiresAt;
+            updateData.lastUpdated = admin.firestore.FieldValue.serverTimestamp();
+        } else {
+            updateData.lastUpdated = admin.firestore.FieldValue.serverTimestamp();
+        }
 
-        console.log(`✅ Updated user ${userId}: +${credits} credits, plan ${planName}, expiry ${expiresAt.toISOString()}`);
-        res.json({ success: true, credits, plan: planName, expiresAt });
+        await userRef.set(updateData, { merge: true });
+        console.log(`✅ Updated user ${userId}: +${credits} credits${planName ? `, plan ${planName}` : ""}`);
+
+        res.json({ success: true, message: "Credits updated successfully" });
     } catch (error) {
-        console.error("Payment success error:", error);
-        res.status(500).json({ error: "Failed to update user" });
+        console.error("Payment success update error:", error);
+        res.status(500).json({ error: "Failed to update user credits", details: error.message });
     }
 });
 
-// ========== HELPER: HAIRSTYLE PRESERVATION ==========
+// ========== Helper: hairstyle preservation ==========
 function shouldPreserveHairstyle(promptText) {
     const lower = promptText.toLowerCase();
     const changeKeywords = ["change hair", "different hair", "new hair", "different hairstyle", "new hairstyle", "change hairstyle", "alter hair", "modify hair", "different haircut", "new haircut"];
     return !changeKeywords.some(kw => lower.includes(kw));
 }
 
-// ========== 1. GENERATE IMAGE ==========
+// ========== 1. Generate image ==========
 app.post("/api/generate", ensureAuthenticated, async (req, res) => {
     try {
         const { prompt, style } = req.body;
@@ -165,7 +170,7 @@ app.post("/api/generate", ensureAuthenticated, async (req, res) => {
     }
 });
 
-// ========== 2. FACE‑PRESERVING EDIT ==========
+// ========== 2. Face‑preserving edit ==========
 app.post("/api/edit", ensureAuthenticated, upload.single("image"), async (req, res) => {
     try {
         const { prompt } = req.body;
@@ -190,7 +195,7 @@ app.post("/api/edit", ensureAuthenticated, upload.single("image"), async (req, r
     }
 });
 
-// ========== SERVE FRONTEND ==========
+// Serve frontend
 app.use(express.static(path.join(__dirname, "..", "frontend")));
 app.get("*", (req, res) => {
     res.sendFile(path.join(__dirname, "..", "frontend", "index.html"));
