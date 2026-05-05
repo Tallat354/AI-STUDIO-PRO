@@ -348,6 +348,11 @@
                 localStorage.setItem(`subscription_plan_${uid}`, subscription.plan);
                 if (subscription.expiry) localStorage.setItem(`subscription_expiry_${uid}`, subscription.expiry);
                 return true;
+            } else {
+                // First time user – initialize with 20 credits in Firestore
+                await setDoc(doc(db, "users", uid), { credits: 20, createdAt: serverTimestamp() }, { merge: true });
+                credits = 20;
+                localStorage.setItem(`credits_${uid}`, 20);
             }
         } catch (err) {
             console.error("Failed to load Firestore user data:", err);
@@ -485,6 +490,8 @@
             const userCred = await createUserWithEmailAndPassword(auth, email, password);
             await updateProfile(userCred.user, { displayName: `${first} ${last}` });
             await saveUserToFirestore(userCred.user, { firstName: first, lastName: last });
+            // Initialize credits in Firestore
+            await setDoc(doc(db, "users", userCred.user.uid), { credits: 20, createdAt: serverTimestamp() }, { merge: true });
             showToast("Signup Successful ✅");
             closeAuthModal();
         } catch (err) { showToast(err.message, true); }
@@ -614,6 +621,10 @@
             const data = await res.json();
             if (!data.success) throw new Error(data.error);
             console.log("Backend credits update successful:", data);
+            // Update local credits with the new value from backend
+            credits = data.newCredits;
+            localStorage.setItem(`credits_${currentUser.uid}`, credits);
+            updateUI();
             return true;
         } catch (err) {
             console.error("Failed to update credits on backend:", err);
@@ -633,7 +644,6 @@
         } else if (paymentIntent.status === "succeeded") {
             const updated = await handlePaymentSuccess(pendingPlan.creditsAmt, pendingPlan.plan);
             if (updated) {
-                credits += pendingPlan.creditsAmt;
                 subscription.plan = pendingPlan.plan;
                 const expiry = new Date();
                 if (pendingPlan.plan === "weekly") expiry.setDate(expiry.getDate() + 7);
