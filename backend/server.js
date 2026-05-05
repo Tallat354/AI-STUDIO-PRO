@@ -20,12 +20,17 @@ console.log("Stripe keys loaded:", !!STRIPE_PUBLISHABLE_KEY, !!STRIPE_SECRET_KEY
 const stripe = new Stripe(STRIPE_SECRET_KEY);
 fal.config({ credentials: process.env.FAL_KEY });
 
-// ---------- Firebase Admin ----------
+// ========== FIREBASE ADMIN (FIXED) ==========
 let db = null;
 try {
+    // Parse FIREBASE_CONFIG from .env (it must be a valid JSON string)
     const firebaseConfig = JSON.parse(process.env.FIREBASE_CONFIG);
     if (firebaseConfig && firebaseConfig.project_id) {
-        admin.initializeApp({ credential: admin.credential.cert(firebaseConfig) });
+        if (!admin.apps.length) {
+            admin.initializeApp({
+                credential: admin.credential.cert(firebaseConfig)
+            });
+        }
         db = admin.firestore();
         console.log("✅ Firebase Admin connected to Firestore");
     } else {
@@ -84,14 +89,13 @@ app.post("/api/create-payment-intent", ensureAuthenticated, async (req, res) => 
     }
 });
 
-// ========== PAYMENT SUCCESS – UPDATE FIRESTORE ==========
+// ========== PAYMENT SUCCESS – UPDATE FIRESTORE (FIXED) ==========
 app.post("/api/payment-success", ensureAuthenticated, async (req, res) => {
     console.log("🔥 Payment success endpoint hit");
     console.log("Request body:", req.body);
 
     try {
         const { userId, credits, plan } = req.body;
-
         if (!userId) {
             return res.status(400).json({ error: "Missing userId" });
         }
@@ -99,33 +103,32 @@ app.post("/api/payment-success", ensureAuthenticated, async (req, res) => {
             return res.status(400).json({ error: "Invalid credits amount" });
         }
 
-        let days = 0;
-        let planName = null;
+        const userRef = db.collection("users").doc(userId);
+        const updateData = {
+            credits: admin.firestore.FieldValue.increment(credits)
+        };
+
+        // If plan is provided, also update subscription info
         if (plan) {
+            let days = 0;
+            let planName = "";
             switch (plan) {
                 case "weekly": days = 7; planName = "weekly"; break;
                 case "15days": days = 15; planName = "15days"; break;
                 case "monthly": days = 30; planName = "monthly"; break;
                 default: break;
             }
+            if (days > 0) {
+                const expiresAt = new Date();
+                expiresAt.setDate(expiresAt.getDate() + days);
+                updateData.subscriptionPlan = planName;
+                updateData.subscriptionExpiry = expiresAt;
+            }
         }
-
-        const userRef = db.collection("users").doc(userId);
-        const updateData = {
-            credits: admin.firestore.FieldValue.increment(credits)
-        };
-        if (planName && days > 0) {
-            const expiresAt = new Date();
-            expiresAt.setDate(expiresAt.getDate() + days);
-            updateData.subscriptionPlan = planName;
-            updateData.subscriptionExpiry = expiresAt;
-            updateData.lastUpdated = admin.firestore.FieldValue.serverTimestamp();
-        } else {
-            updateData.lastUpdated = admin.firestore.FieldValue.serverTimestamp();
-        }
+        updateData.lastUpdated = admin.firestore.FieldValue.serverTimestamp();
 
         await userRef.set(updateData, { merge: true });
-        console.log(`✅ Updated user ${userId}: +${credits} credits${planName ? `, plan ${planName}` : ""}`);
+        console.log(`✅ Updated user ${userId}: +${credits} credits${plan ? `, plan ${plan}` : ""}`);
 
         res.json({ success: true, message: "Credits updated successfully" });
     } catch (error) {
@@ -134,7 +137,7 @@ app.post("/api/payment-success", ensureAuthenticated, async (req, res) => {
     }
 });
 
-// ========== DAILY REWARD ==========
+// ========== DAILY REWARD – FIXED ==========
 app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
     try {
         const { userId } = req.body;
