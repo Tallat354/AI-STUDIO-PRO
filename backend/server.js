@@ -20,7 +20,7 @@ console.log("Stripe keys loaded:", !!STRIPE_PUBLISHABLE_KEY, !!STRIPE_SECRET_KEY
 const stripe = new Stripe(STRIPE_SECRET_KEY);
 fal.config({ credentials: process.env.FAL_KEY });
 
-// ---------- Firebase Admin (ensure it's the same project as frontend) ----------
+// ---------- Firebase Admin ----------
 let db = null;
 try {
     const firebaseConfig = JSON.parse(process.env.FIREBASE_CONFIG);
@@ -46,7 +46,7 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// ---------- Auth middleware (verify Firebase ID token) ----------
+// ---------- Auth middleware ----------
 async function ensureAuthenticated(req, res, next) {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -88,30 +88,23 @@ app.post("/api/create-payment-intent", ensureAuthenticated, async (req, res) => 
     }
 });
 
-// ========== PAYMENT SUCCESS – UPDATE FIRESTORE (FIXED) ==========
+// ========== PAYMENT SUCCESS – UPDATE FIRESTORE ==========
 app.post("/api/payment-success", ensureAuthenticated, async (req, res) => {
     console.log("🔥 Payment success endpoint hit");
     console.log("Request body:", req.body);
 
     try {
         const { userId, credits, plan } = req.body;
-        if (!userId) {
-            return res.status(400).json({ error: "Missing userId" });
-        }
-        if (!credits || isNaN(credits)) {
-            return res.status(400).json({ error: "Invalid credits amount" });
-        }
+        if (!userId) return res.status(400).json({ error: "Missing userId" });
+        if (!credits || isNaN(credits)) return res.status(400).json({ error: "Invalid credits amount" });
 
         const userRef = db.collection("users").doc(userId);
-        // Increment credits (if document doesn't exist, it will be created)
         await userRef.set({
             credits: admin.firestore.FieldValue.increment(parseInt(credits))
         }, { merge: true });
 
-        // If plan is provided, also update subscription info
         if (plan) {
-            let days = 0;
-            let planName = "";
+            let days = 0, planName = "";
             switch (plan) {
                 case "weekly": days = 7; planName = "weekly"; break;
                 case "15days": days = 15; planName = "15days"; break;
@@ -129,10 +122,8 @@ app.post("/api/payment-success", ensureAuthenticated, async (req, res) => {
             }
         }
 
-        // Fetch updated document to return new credit balance
         const updatedDoc = await userRef.get();
         const newCredits = updatedDoc.data()?.credits || 0;
-
         console.log(`✅ Updated user ${userId}: +${credits} credits, new total: ${newCredits}`);
         res.json({ success: true, newCredits: newCredits });
     } catch (error) {
@@ -143,6 +134,8 @@ app.post("/api/payment-success", ensureAuthenticated, async (req, res) => {
 
 // ========== DAILY REWARD – FIXED ==========
 app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
+    console.log("🔥 Daily reward endpoint hit");
+    console.log("Request body:", req.body);
     try {
         const { userId } = req.body;
         if (!userId) {
@@ -164,7 +157,7 @@ app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
             });
         }
 
-        // Increment credits and update last claim time
+        // Update credits and last claim time
         await userRef.set({
             credits: admin.firestore.FieldValue.increment(10),
             lastDailyReward: now
@@ -180,8 +173,9 @@ app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
             newCredits: newCredits
         });
     } catch (error) {
-        console.error("Daily reward error:", error);
-        res.status(500).json({ error: "Failed to claim daily reward" });
+        console.error("❌ Daily reward error:", error);
+        // Send the full error message to the frontend (only in development)
+        res.status(500).json({ error: error.message, details: error.toString() });
     }
 });
 
