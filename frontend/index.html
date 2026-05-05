@@ -7,7 +7,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
-        /* Your existing CSS – unchanged */
+        /* All CSS – exactly as before, no changes */
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Inter', sans-serif;
@@ -300,8 +300,8 @@
     import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut, updateProfile, sendPasswordResetEmail } from "firebase/auth";
     import { getFirestore, doc, getDoc, setDoc, updateDoc, increment, serverTimestamp } from "firebase/firestore";
 
-    // 👇 IMPORTANT: change to your actual backend Render URL
-    const API_BASE = "https://ai-studio-pro-lquw.onrender.com/api";   // Your backend URL
+    // 👇 IMPORTANT: CHANGE THIS TO YOUR RENDER BACKEND URL
+    const API_BASE = "https://ai-studio-pro-lquw.onrender.com/api";
 
     const firebaseConfig = {
         apiKey: "AIzaSyAe8-hjKY0OXgiMsyA2nf4Qup-KCrWKOw8",
@@ -314,9 +314,8 @@
 
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
-    const db = getFirestore(app, "mydata");
+    const db = getFirestore(app);
 
-    // ---------- Global state ----------
     let currentUser = null;
     let idToken = null;
     let credits = 0;
@@ -341,7 +340,6 @@
         setTimeout(() => toast.remove(), 3000);
     }
 
-    // ---------- Firestore operations ----------
     async function loadUserFromFirestore(user) {
         if (!user) return;
         const userRef = doc(db, "users", user.uid);
@@ -351,7 +349,6 @@
             credits = data.credits || 20;
             lastDaily = data.lastDailyClaim;
         } else {
-            // Create new user document
             await setDoc(userRef, {
                 credits: 20,
                 lastDailyClaim: null,
@@ -372,7 +369,6 @@
         }
     }
 
-    // ---------- Daily reward ----------
     async function claimDaily() {
         if (!currentUser) {
             showToast("Please sign in first", true);
@@ -389,7 +385,6 @@
                 credits = data.credits;
                 updateUI();
                 showToast(data.message);
-                // Also refresh from Firestore to be safe
                 await syncCreditsFromFirestore();
             } else {
                 showToast(data.error, true);
@@ -400,7 +395,6 @@
         }
     }
 
-    // ---------- Stripe ----------
     async function initStripe() {
         try {
             const res = await fetch(`${API_BASE}/stripe-key`);
@@ -408,7 +402,7 @@
             const data = await res.json();
             if (data.publishableKey) {
                 stripe = Stripe(data.publishableKey);
-                const elements = stripe.elements();
+                elements = stripe.elements();
                 card = elements.create("card", { style: { base: { color: "#fff", fontSize: "16px" } } });
                 card.mount("#card-element");
                 card.addEventListener("change", (event) => {
@@ -467,9 +461,6 @@
             else if (pendingPlan.plan === "15days") expiry.setDate(expiry.getDate() + 15);
             else if (pendingPlan.plan === "monthly") expiry.setMonth(expiry.getMonth() + 1);
             subscription.expiry = expiry.toISOString();
-            // Update Firestore credits directly via backend? The backend already adds credits in payment intent metadata? Actually we need to add credits in Firestore after payment success.
-            // For simplicity, we will update frontend state and also call an API to add credits (or the backend already does it via webhook). Here we'll just increment locally and sync later.
-            // But to ensure persistence, we can call another endpoint or just rely on Firestore sync. Let's directly update Firestore.
             const userRef = doc(db, "users", currentUser.uid);
             await updateDoc(userRef, { credits: increment(pendingPlan.creditsAmt) });
             await syncCreditsFromFirestore();
@@ -482,7 +473,6 @@
         }
     }
 
-    // ---------- UI helpers ----------
     function updateUI() {
         document.getElementById("creditDisplay").innerText = credits;
         if (document.getElementById("dashCredits")) document.getElementById("dashCredits").innerText = credits;
@@ -529,7 +519,6 @@
         else avatarDiv.innerHTML = `<i class="fas fa-user-astronaut"></i>`;
     }
 
-    // ---------- Auth functions ----------
     async function signupWithEmail() {
         const first = document.getElementById("signupFirst").value.trim();
         const last = document.getElementById("signupLast").value.trim();
@@ -590,7 +579,6 @@
         window.location.reload();
     }
 
-    // Forgot password
     document.getElementById("forgotPasswordLink")?.addEventListener("click", (e) => {
         e.preventDefault();
         document.getElementById("forgotPasswordForm").style.display = "block";
@@ -610,7 +598,6 @@
         document.getElementById("resetEmail").value = "";
     });
 
-    // ---------- AI API calls ----------
     async function fetchWithAuth(url, options = {}) {
         if (!idToken) throw new Error("No auth token");
         const headers = { ...options.headers, "Authorization": `Bearer ${idToken}` };
@@ -642,7 +629,6 @@
             document.getElementById("genImage").src = currentGenImage;
             credits--;
             totalGenerations++;
-            // Update Firestore credits
             const userRef = doc(db, "users", currentUser.uid);
             await updateDoc(userRef, { credits: increment(-1) });
             updateUI();
@@ -730,13 +716,11 @@
         setTimeout(() => a.remove(), 100);
     }
 
-    // ---------- Auth state listener ----------
     onAuthStateChanged(auth, async (user) => {
         currentUser = user;
         if (user) {
             idToken = await user.getIdToken();
             await loadUserFromFirestore(user);
-            // Load gallery from localStorage
             const savedGallery = localStorage.getItem(`gallery_${user.uid}`);
             if (savedGallery) gallery = JSON.parse(savedGallery);
             else gallery = [];
@@ -755,12 +739,10 @@
         }
     });
 
-    // ---------- UI listeners ----------
     function openAuthModal() { document.getElementById("authModal").classList.add("active"); }
     function closeAuthModal() { document.getElementById("authModal").classList.remove("active"); }
 
     document.addEventListener("DOMContentLoaded", () => {
-        // Avatar menu
         document.getElementById("userAvatarBtn")?.addEventListener("click", () => {
             if (currentUser) {
                 const existing = document.querySelector(".user-menu");
@@ -819,7 +801,6 @@
         document.getElementById("googlePayMock")?.addEventListener("click", () => showToast("Google Pay coming soon", true));
         document.getElementById("upgradePlanBtn")?.addEventListener("click", () => document.getElementById("paymentModal").classList.add("active"));
 
-        // Tabs
         document.querySelectorAll(".tab").forEach(tab => {
             tab.addEventListener("click", () => {
                 const target = tab.dataset.tab;
@@ -832,7 +813,6 @@
             });
         });
 
-        // Style cards
         document.querySelectorAll(".style-card").forEach(card => {
             card.addEventListener("click", () => {
                 document.querySelectorAll(".style-card").forEach(c => c.classList.remove("active"));
@@ -841,7 +821,6 @@
             });
         });
 
-        // Upload zone
         const zone = document.getElementById("uploadZone");
         const fileInput = document.getElementById("editUpload");
         if (zone && fileInput) {
