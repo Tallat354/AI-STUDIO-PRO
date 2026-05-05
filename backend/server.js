@@ -14,7 +14,7 @@ const Stripe = require("stripe");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ========== ALLOW ANY ORIGIN (for CORS) ==========
+// ========== STRONG CORS – allow any origin ==========
 app.use(cors({ origin: "*", methods: ["GET", "POST", "OPTIONS"], allowedHeaders: ["Content-Type", "Authorization"] }));
 app.options('*', cors());
 
@@ -44,7 +44,7 @@ try {
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-// ---------- Auth middleware ----------
+// ========== Auth middleware ==========
 async function ensureAuthenticated(req, res, next) {
     if (req.method === 'OPTIONS') return next();
     const authHeader = req.headers.authorization;
@@ -61,15 +61,16 @@ async function ensureAuthenticated(req, res, next) {
     }
 }
 
-// ========== 1. Stripe – return publishable key ==========
+// ========== 1. Stripe key ==========
 app.get("/api/stripe-key", (req, res) => {
     res.json({ publishableKey: STRIPE_PUBLISHABLE_KEY });
 });
 
-// ========== 2. Stripe – create payment intent ==========
+// ========== 2. Create payment intent ==========
 app.post("/api/create-payment-intent", ensureAuthenticated, async (req, res) => {
     try {
         const { amount, credits, planName } = req.body;
+        if (!amount || amount <= 0) throw new Error("Invalid amount");
         const paymentIntent = await stripe.paymentIntents.create({
             amount: Math.round(amount * 100),
             currency: "usd",
@@ -83,7 +84,7 @@ app.post("/api/create-payment-intent", ensureAuthenticated, async (req, res) => 
     }
 });
 
-// ========== 3. Daily reward (increment credits) ==========
+// ========== 3. Daily reward ==========
 app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
     try {
         const userId = req.user.uid;
@@ -92,7 +93,11 @@ app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
         const userDoc = await userRef.get();
 
         if (!userDoc.exists) {
-            await userRef.set({ credits: 20, lastDailyClaim: null, createdAt: admin.firestore.FieldValue.serverTimestamp() });
+            await userRef.set({
+                credits: 20,
+                lastDailyClaim: null,
+                createdAt: admin.firestore.FieldValue.serverTimestamp()
+            });
         }
 
         const existing = await userRef.get();
@@ -106,14 +111,30 @@ app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
         });
 
         const updated = await userRef.get();
-        res.json({ success: true, credits: updated.data().credits, message: "+10 credits" });
+        res.json({ success: true, credits: updated.data().credits, message: "+10 credits added" });
     } catch (err) {
         console.error("Daily reward error:", err);
         res.status(500).json({ error: err.message });
     }
 });
 
-// ========== 4. AI generate & edit (unchanged) ==========
+// ========== 4. Get user credits ==========
+app.get("/api/user/credits", ensureAuthenticated, async (req, res) => {
+    try {
+        const userId = req.user.uid;
+        const userRef = db.collection("users").doc(userId);
+        const userDoc = await userRef.get();
+        if (!userDoc.exists) {
+            await userRef.set({ credits: 20, lastDailyClaim: null, createdAt: admin.firestore.FieldValue.serverTimestamp() });
+            return res.json({ credits: 20 });
+        }
+        res.json({ credits: userDoc.data().credits || 20 });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ========== 5. AI endpoints (generate, edit) – keep your existing code ==========
 function shouldPreserveHairstyle(promptText) {
     const lower = promptText.toLowerCase();
     const changeKeywords = ["change hair", "different hair", "new hair", "different hairstyle", "new hairstyle", "change hairstyle", "alter hair", "modify hair", "different haircut", "new haircut"];
@@ -168,7 +189,7 @@ app.post("/api/edit", ensureAuthenticated, upload.single("image"), async (req, r
     }
 });
 
-// ========== Serve static frontend (optional) ==========
+// Serve static frontend (optional)
 app.use(express.static(path.join(__dirname, "..", "frontend")));
 app.get("*", (req, res) => {
     res.sendFile(path.join(__dirname, "..", "frontend", "index.html"));
