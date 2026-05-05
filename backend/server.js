@@ -10,19 +10,18 @@ const fs = require("fs");
 const Stripe = require("stripe");
 
 // -------------------------
-// 1. CONFIGURATION (NO DUPLICATE PORT)
+// 1. CONFIGURATION
 // -------------------------
 const PORT = process.env.PORT || 3000;
 const app = express();
 
-// CORS – allow all (important for Render)
 app.use(cors({ origin: "*" }));
 app.options("*", cors());
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true }));
 
 // -------------------------
-// 2. STRIPE INIT
+// 2. STRIPE
 // -------------------------
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const STRIPE_PUBLISHABLE_KEY = process.env.STRIPE_PUBLISHABLE_KEY;
@@ -30,7 +29,7 @@ if (!STRIPE_SECRET_KEY) console.error("❌ STRIPE_SECRET_KEY missing");
 const stripe = new Stripe(STRIPE_SECRET_KEY);
 
 // -------------------------
-// 3. FAL.AI CONFIG
+// 3. FAL.AI
 // -------------------------
 if (process.env.FAL_KEY) {
   fal.config({ credentials: process.env.FAL_KEY });
@@ -39,7 +38,7 @@ if (process.env.FAL_KEY) {
 }
 
 // -------------------------
-// 4. FIREBASE ADMIN (with connection check)
+// 4. FIREBASE ADMIN (users collection)
 // -------------------------
 let db = null;
 let adminAuth = null;
@@ -49,21 +48,37 @@ try {
     admin.initializeApp({ credential: admin.credential.cert(firebaseConfig) });
     db = admin.firestore();
     adminAuth = admin.auth();
-    console.log("✅ Firebase Admin connected");
-    // optional: test connection
-    db.collection("users").limit(1).get().catch(e => {
-      console.warn("⚠️ Firestore read failed – is the database enabled?");
-      console.warn("   Create Firestore at: https://console.cloud.google.com/firestore");
-    });
+    console.log("✅ Firebase Admin connected (using 'users' collection)");
   } else {
-    console.warn("⚠️ Firebase config incomplete – auth/db will fail");
+    console.warn("⚠️ Firebase config incomplete");
   }
 } catch (err) {
   console.warn("⚠️ Firebase config parse error:", err.message);
 }
 
 // -------------------------
-// 5. AUTH MIDDLEWARE (safe)
+// 5. Helper: Ensure user document exists with 20 credits
+//    Collection name: "users" (NOT "user")
+// -------------------------
+async function ensureUserDocument(uid) {
+  if (!db) throw new Error("Firestore not available");
+  const userRef = db.collection("users").doc(uid);
+  const docSnap = await userRef.get();
+  if (!docSnap.exists) {
+    // Create new user document with 20 credits
+    await userRef.set({
+      credits: 20,
+      lastDailyClaim: null,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    console.log(`✅ Created new user document for ${uid} with 20 credits`);
+    return { credits: 20, lastDailyClaim: null };
+  }
+  return docSnap.data();
+}
+
+// -------------------------
+// 6. Auth Middleware
 // -------------------------
 async function ensureAuthenticated(req, res, next) {
   if (req.method === "OPTIONS") return next();
@@ -78,30 +93,16 @@ async function ensureAuthenticated(req, res, next) {
   try {
     const decoded = await adminAuth.verifyIdToken(idToken);
     req.user = decoded;
+    // Ensure user document exists (auto-create with 20 credits)
+    await ensureUserDocument(decoded.uid);
     next();
   } catch (err) {
     return res.status(401).json({ error: "Invalid token" });
   }
 }
 
-// Helper: ensure user document exists with 20 credits
-async function ensureUserDocument(userId) {
-  if (!db) return null;
-  const userRef = db.collection("users").doc(userId);
-  const docSnap = await userRef.get();
-  if (!docSnap.exists) {
-    await userRef.set({
-      credits: 20,
-      lastDailyClaim: null,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-    return { credits: 20, lastDailyClaim: null };
-  }
-  return docSnap.data();
-}
-
 // -------------------------
-// 6. STRIPE ENDPOINTS
+// 7. Stripe Endpoints
 // -------------------------
 app.get("/api/stripe-key", (req, res) => {
   if (!STRIPE_PUBLISHABLE_KEY) {
@@ -134,22 +135,18 @@ app.post("/api/create-payment-intent", ensureAuthenticated, async (req, res) => 
 });
 
 // -------------------------
-// 7. DAILY REWARD (FIXED: 24h cooldown, auto-create user)
+// 8. Daily Reward (24h cooldown, uses "users" collection)
 // -------------------------
 app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
   if (!db) {
     return res.status(503).json({ error: "Firestore not available" });
   }
   try {
-    const userId = req.user.uid;
-    const userRef = db.collection("users").doc(userId);
+    const uid = req.user.uid;
+    const userRef = db.collection("users").doc(uid);
+    const userData = await ensureUserDocument(uid);
     
-    // Ensure user document exists (with 20 credits if new)
-    await ensureUserDocument(userId);
-    
-    const docSnap = await userRef.get();
-    const userData = docSnap.data();
-    const lastClaim = userData.lastDailyClaim;
+    const lastClaim = userData.lastDailyClaim ? userData.lastDailyClaim.toDate ? userData.lastDailyClaim.toDate().getTime() : userData.lastDailyClaim : null;
     const now = Date.now();
     const twentyFourHours = 24 * 60 * 60 * 1000;
     
@@ -158,7 +155,7 @@ app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
       return res.status(400).json({ error: `Already claimed. Try again in ${hoursLeft} hours` });
     }
     
-    // Add 10 credits and update last claim time
+    // Add 10 credits and update last claim
     await userRef.update({
       credits: admin.firestore.FieldValue.increment(10),
       lastDailyClaim: admin.firestore.FieldValue.serverTimestamp()
@@ -177,7 +174,7 @@ app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
 });
 
 // -------------------------
-// 8. AI GENERATION (fal.ai)
+// 9. AI Generation (with credit deduction)
 // -------------------------
 app.post("/api/generate", ensureAuthenticated, async (req, res) => {
   try {
@@ -201,16 +198,14 @@ app.post("/api/generate", ensureAuthenticated, async (req, res) => {
         enable_safety_checker: false,
       },
     });
-    const imageUrl =
-      result?.data?.images?.[0]?.url ||
-      result?.images?.[0]?.url ||
-      result?.data?.image?.url ||
-      result?.image?.url;
+    const imageUrl = result?.data?.images?.[0]?.url ||
+                     result?.images?.[0]?.url ||
+                     result?.data?.image?.url ||
+                     result?.image?.url;
 
     if (!imageUrl) return res.status(500).json({ error: "No image URL" });
     
-    // Deduct 1 credit (handled on frontend, but you can also verify here)
-    // For extra safety, you can deduct here:
+    // Deduct 1 credit (user document already exists because ensureAuthenticated called ensureUserDocument)
     if (db) {
       const userRef = db.collection("users").doc(req.user.uid);
       await userRef.update({ credits: admin.firestore.FieldValue.increment(-1) });
@@ -223,7 +218,9 @@ app.post("/api/generate", ensureAuthenticated, async (req, res) => {
   }
 });
 
-// Helper for hairstyle preservation
+// -------------------------
+// 10. Face Edit Endpoint
+// -------------------------
 function shouldPreserveHairstyle(promptText) {
   const lower = promptText.toLowerCase();
   const changeKeywords = [
@@ -263,11 +260,10 @@ app.post("/api/edit", ensureAuthenticated, upload.single("image"), async (req, r
       },
     });
 
-    const imageUrl =
-      result?.data?.image?.url ||
-      result?.data?.images?.[0]?.url ||
-      result?.image?.url ||
-      result?.images?.[0]?.url;
+    const imageUrl = result?.data?.image?.url ||
+                     result?.data?.images?.[0]?.url ||
+                     result?.image?.url ||
+                     result?.images?.[0]?.url;
 
     if (!imageUrl) return res.status(500).json({ error: "No edited image" });
     
@@ -285,25 +281,24 @@ app.post("/api/edit", ensureAuthenticated, upload.single("image"), async (req, r
 });
 
 // -------------------------
-// 9. SERVE FRONTEND FROM ../frontend (FIXED PATH)
+// 11. Serve Frontend from ../frontend
 // -------------------------
 const frontendPath = path.join(__dirname, "../frontend");
 if (!fs.existsSync(frontendPath)) {
   console.error(`❌ Frontend folder not found at ${frontendPath}`);
-  console.error("   Expected structure: backend/server.js + frontend/index.html");
 } else {
   console.log(`✅ Serving frontend from ${frontendPath}`);
 }
 app.use(express.static(frontendPath));
-// Catch-all to serve index.html for client-side routing (though your app doesn't have routes)
 app.get("*", (req, res) => {
   res.sendFile(path.join(frontendPath, "index.html"));
 });
 
 // -------------------------
-// 10. START SERVER
+// 12. Start Server
 // -------------------------
 app.listen(PORT, () => {
   console.log(`🚀 Backend running on http://localhost:${PORT}`);
-  console.log(`   Serving static: ${frontendPath}`);
+  console.log(`   Firestore collection: "users"`);
+  console.log(`   Static folder: ${frontendPath}`);
 });
