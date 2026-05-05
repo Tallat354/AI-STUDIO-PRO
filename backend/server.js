@@ -88,131 +88,91 @@ app.post("/api/create-payment-intent", ensureAuthenticated, async (req, res) => 
     }
 });
 
-// ========== PAYMENT SUCCESS – UPDATE FIRESTORE ==========
+// ========== PAYMENT SUCCESS (safe transaction) ==========
 app.post("/api/payment-success", ensureAuthenticated, async (req, res) => {
-    console.log("🔥 Payment success endpoint hit");
-    console.log("Request body:", req.body);
-
+    console.log("🔥 Payment success hit", req.body);
     try {
         const { userId, credits, plan } = req.body;
-        if (!userId) return res.status(400).json({ error: "Missing userId" });
-        if (!credits || isNaN(credits)) return res.status(400).json({ error: "Invalid credits amount" });
+        if (!userId || !credits) return res.status(400).json({ error: "Missing data" });
 
         const userRef = db.collection("users").doc(userId);
-        // First, ensure document exists (set default credits if not)
-        const doc = await userRef.get();
-        if (!doc.exists) {
-            await userRef.set({ credits: 20, createdAt: admin.firestore.FieldValue.serverTimestamp() });
-        }
+        await db.runTransaction(async (t) => {
+            const doc = await t.get(userRef);
+            if (!doc.exists) {
+                t.set(userRef, { credits: 20, createdAt: admin.firestore.FieldValue.serverTimestamp() });
+            }
+            t.update(userRef, { credits: admin.firestore.FieldValue.increment(parseInt(credits)) });
+        });
 
-        // Then increment credits
-        await userRef.set({
-            credits: admin.firestore.FieldValue.increment(parseInt(credits))
-        }, { merge: true });
-
-        // Subscription plan update
         if (plan) {
             let days = 0, planName = "";
-            switch (plan) {
-                case "weekly": days = 7; planName = "weekly"; break;
-                case "15days": days = 15; planName = "15days"; break;
-                case "monthly": days = 30; planName = "monthly"; break;
-                default: break;
-            }
+            if (plan === "weekly") { days = 7; planName = "weekly"; }
+            else if (plan === "15days") { days = 15; planName = "15days"; }
+            else if (plan === "monthly") { days = 30; planName = "monthly"; }
             if (days > 0) {
                 const expiresAt = new Date();
                 expiresAt.setDate(expiresAt.getDate() + days);
-                await userRef.set({
-                    subscriptionPlan: planName,
-                    subscriptionExpiry: expiresAt,
-                    lastUpdated: admin.firestore.FieldValue.serverTimestamp()
-                }, { merge: true });
+                await userRef.set({ subscriptionPlan: planName, subscriptionExpiry: expiresAt }, { merge: true });
             }
         }
 
-        const updatedDoc = await userRef.get();
-        const newCredits = updatedDoc.data()?.credits || 0;
-        console.log(`✅ Updated user ${userId}: +${credits} credits, new total: ${newCredits}`);
-        res.json({ success: true, newCredits: newCredits });
-    } catch (error) {
-        console.error("Payment success update error:", error);
-        res.status(500).json({ error: "Failed to update user credits", details: error.message });
+        const newDoc = await userRef.get();
+        res.json({ success: true, newCredits: newDoc.data().credits });
+    } catch (err) {
+        console.error("Payment success error:", err);
+        res.status(500).json({ error: err.message });
     }
 });
 
-// ========== DAILY REWARD – SIMPLE VERSION (NO TRANSACTION) ==========
+// ========== DAILY REWARD (safe transaction) ==========
 app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
-    console.log("🔥 Daily reward endpoint hit");
-    console.log("Request body:", req.body);
+    console.log("🔥 Daily reward hit", req.body);
     try {
         const { userId } = req.body;
-        if (!userId) {
-            return res.status(400).json({ error: "Missing userId" });
-        }
+        if (!userId) return res.status(400).json({ error: "Missing userId" });
 
         const userRef = db.collection("users").doc(userId);
-        const userDoc = await userRef.get();
+        let newCredits = 0;
+        await db.runTransaction(async (t) => {
+            const doc = await t.get(userRef);
+            const now = Date.now();
+            const lastClaim = doc.exists ? doc.data().lastDailyReward : null;
+            const oneDay = 24 * 60 * 60 * 1000;
 
-        const now = Date.now();
-        const lastClaim = userDoc.exists ? userDoc.data().lastDailyReward : null;
-        const oneDay = 24 * 60 * 60 * 1000;
+            if (lastClaim && (now - lastClaim) < oneDay) {
+                const hoursLeft = Math.ceil((oneDay - (now - lastClaim)) / (3600000));
+                throw new Error(`Already claimed! Next in ${hoursLeft} hours.`);
+            }
 
-        if (lastClaim && (now - lastClaim) < oneDay) {
-            const hoursLeft = Math.ceil((oneDay - (now - lastClaim)) / (60 * 60 * 1000));
-            return res.status(400).json({
-                error: `Already claimed today! Next reward in ${hoursLeft} hours.`,
-                alreadyClaimed: true
-            });
+            if (!doc.exists) {
+                t.set(userRef, { credits: 20, lastDailyReward: now, createdAt: admin.firestore.FieldValue.serverTimestamp() });
+                newCredits = 30;
+            } else {
+                t.update(userRef, {
+                    credits: admin.firestore.FieldValue.increment(10),
+                    lastDailyReward: now
+                });
+                newCredits = (doc.data().credits || 0) + 10;
+            }
+        });
+        const finalDoc = await userRef.get();
+        res.json({ success: true, newCredits: finalDoc.data().credits });
+    } catch (err) {
+        console.error("Daily reward error:", err.message);
+        if (err.message.includes("Already claimed")) {
+            return res.status(400).json({ error: err.message, alreadyClaimed: true });
         }
-
-        // Prepare update data
-        const updateData = {
-            lastDailyReward: now
-        };
-
-        if (!userDoc.exists) {
-            // First time user: create document with 20 credits + add 10 = 30
-            await userRef.set({
-                credits: 30,
-                lastDailyReward: now,
-                createdAt: admin.firestore.FieldValue.serverTimestamp()
-            });
-            const newCredits = 30;
-            console.log(`✅ First claim for ${userId}: +10 credits, total: ${newCredits}`);
-            return res.json({
-                success: true,
-                message: "+10 credits added! Welcome!",
-                newCredits: newCredits
-            });
-        } else {
-            // Existing user: increment by 10
-            await userRef.update({
-                credits: admin.firestore.FieldValue.increment(10),
-                lastDailyReward: now
-            });
-            const oldCredits = userDoc.data().credits || 20;
-            const newCredits = oldCredits + 10;
-            console.log(`✅ Daily reward claimed for ${userId}: +10 credits, total: ${newCredits}`);
-            return res.json({
-                success: true,
-                message: "+10 credits added!",
-                newCredits: newCredits
-            });
-        }
-    } catch (error) {
-        console.error("❌ Daily reward error:", error);
-        res.status(500).json({ error: "Failed to claim daily reward", details: error.message });
+        res.status(500).json({ error: "Failed to claim reward" });
     }
 });
 
-// ========== Helper: hairstyle preservation ==========
+// ========== AI endpoints (unchanged) ==========
 function shouldPreserveHairstyle(promptText) {
     const lower = promptText.toLowerCase();
     const changeKeywords = ["change hair", "different hair", "new hair", "different hairstyle", "new hairstyle", "change hairstyle", "alter hair", "modify hair", "different haircut", "new haircut"];
     return !changeKeywords.some(kw => lower.includes(kw));
 }
 
-// ========== 1. Generate image ==========
 app.post("/api/generate", ensureAuthenticated, async (req, res) => {
     try {
         const { prompt, style } = req.body;
@@ -237,7 +197,6 @@ app.post("/api/generate", ensureAuthenticated, async (req, res) => {
     }
 });
 
-// ========== 2. Face‑preserving edit ==========
 app.post("/api/edit", ensureAuthenticated, upload.single("image"), async (req, res) => {
     try {
         const { prompt } = req.body;
@@ -262,7 +221,7 @@ app.post("/api/edit", ensureAuthenticated, upload.single("image"), async (req, r
     }
 });
 
-// ========== Serve frontend ==========
+// Serve frontend
 app.use(express.static(path.join(__dirname, "..", "frontend")));
 app.get("*", (req, res) => {
     res.sendFile(path.join(__dirname, "..", "frontend", "index.html"));
