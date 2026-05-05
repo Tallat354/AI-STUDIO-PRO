@@ -1,7 +1,7 @@
 require("dotenv").config();
 
 const express = require("express");
-const cors = require("cors");
+const cors = require("cors");          // ✅ CORS package
 const multer = require("multer");
 const sharp = require("sharp");
 const FormData = require("form-data");
@@ -38,30 +38,24 @@ try {
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 
-// ========== CORS CONFIGURATION (FIX) ==========
-const allowedOrigins = [
-    'https://ai-studio-pro-iquw.onrender.com',  // Your frontend on Render
-    'http://localhost:3000',
-    'http://localhost:5500',
-    'http://127.0.0.1:5500'
-];
+// ========== CORS FIX – ALLOW YOUR FRONTEND ORIGIN ==========
+// Allow all origins (for Render hosted frontend) – safe because authentication is token‑based
 app.use(cors({
     origin: function (origin, callback) {
         // Allow requests with no origin (like mobile apps or curl)
         if (!origin) return callback(null, true);
-        if (allowedOrigins.indexOf(origin) !== -1) {
-            callback(null, true);
-        } else {
-            console.log("Blocked by CORS:", origin);
-            callback(new Error('Not allowed by CORS'));
-        }
+        // You can also add your frontend Render URL explicitly if you prefer
+        // const allowedOrigins = ['https://ai-studio-pro-iquw.onrender.com', 'http://localhost:3000'];
+        // if (allowedOrigins.indexOf(origin) !== -1) return callback(null, true);
+        // For now, allow all (simplest fix)
+        return callback(null, true);
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// Handle preflight requests (automatically handled by cors middleware)
+// Handle preflight requests (automatically done by cors middleware)
 app.options('*', cors());
 
 app.use(express.json({ limit: "50mb" }));
@@ -117,7 +111,6 @@ app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
         const userRef = db.collection("users").doc(userId);
         const userDoc = await userRef.get();
 
-        // If user document doesn't exist, create it with default credits
         if (!userDoc.exists) {
             await userRef.set({
                 credits: 20,
@@ -126,20 +119,17 @@ app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
             });
         }
 
-        // Check if already claimed today
         const existing = await userRef.get();
         const lastClaim = existing.data().lastDailyClaim;
         if (lastClaim === today) {
             return res.status(400).json({ error: "Daily reward already claimed today" });
         }
 
-        // Increment credits by 10 and update last claim timestamp
         await userRef.update({
             credits: admin.firestore.FieldValue.increment(10),
             lastDailyClaim: today
         });
 
-        // Get updated credits
         const updated = await userRef.get();
         const newCredits = updated.data().credits;
 
@@ -150,7 +140,7 @@ app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
     }
 });
 
-// ========== AI ENDPOINTS (unchanged) ==========
+// ========== AI ENDPOINTS ==========
 function shouldPreserveHairstyle(promptText) {
     const lower = promptText.toLowerCase();
     const changeKeywords = ["change hair", "different hair", "new hair", "different hairstyle", "new hairstyle", "change hairstyle", "alter hair", "modify hair", "different haircut", "new haircut"];
@@ -205,10 +195,10 @@ app.post("/api/edit", ensureAuthenticated, upload.single("image"), async (req, r
     }
 });
 
-// ========== SERVE FRONTEND (if needed) – optional ==========
+// Optional: serve frontend (if you want, but you already have separate frontend)
 app.use(express.static(path.join(__dirname, "..", "frontend")));
 app.get("*", (req, res) => {
     res.sendFile(path.join(__dirname, "..", "frontend", "index.html"));
 });
 
-app.listen(PORT, () => console.log(`🚀 Backend running on http://localhost:${PORT} and CORS enabled for frontend`));
+app.listen(PORT, () => console.log(`🚀 Backend running on http://localhost:${PORT}`));
