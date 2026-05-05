@@ -1,7 +1,7 @@
 require("dotenv").config();
 
 const express = require("express");
-const cors = require("cors");          // ✅ CORS package
+const cors = require("cors");               // <-- added
 const multer = require("multer");
 const sharp = require("sharp");
 const FormData = require("form-data");
@@ -10,6 +10,16 @@ const fal = require("@fal-ai/serverless-client");
 const admin = require("firebase-admin");
 const path = require("path");
 const Stripe = require("stripe");
+
+const app = express();
+
+// ========== CORS FIX – place BEFORE any routes ==========
+app.use(cors({
+    origin: true,           // reflects request origin (allows any domain)
+    credentials: true,      // allows Authorization header
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+}));
+app.options('*', cors());   // handle preflight requests
 
 const PORT = process.env.PORT || 3000;
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
@@ -35,28 +45,7 @@ try {
     console.warn("⚠️ Firebase config error", err.message);
 }
 
-const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
-
-// ========== CORS FIX – ALLOW YOUR FRONTEND ORIGIN ==========
-// Allow all origins (for Render hosted frontend) – safe because authentication is token‑based
-app.use(cors({
-    origin: function (origin, callback) {
-        // Allow requests with no origin (like mobile apps or curl)
-        if (!origin) return callback(null, true);
-        // You can also add your frontend Render URL explicitly if you prefer
-        // const allowedOrigins = ['https://ai-studio-pro-iquw.onrender.com', 'http://localhost:3000'];
-        // if (allowedOrigins.indexOf(origin) !== -1) return callback(null, true);
-        // For now, allow all (simplest fix)
-        return callback(null, true);
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
-}));
-
-// Handle preflight requests (automatically done by cors middleware)
-app.options('*', cors());
 
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true }));
@@ -140,7 +129,7 @@ app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
     }
 });
 
-// ========== AI ENDPOINTS ==========
+// ========== AI ENDPOINTS (unchanged) ==========
 function shouldPreserveHairstyle(promptText) {
     const lower = promptText.toLowerCase();
     const changeKeywords = ["change hair", "different hair", "new hair", "different hairstyle", "new hairstyle", "change hairstyle", "alter hair", "modify hair", "different haircut", "new haircut"];
@@ -195,7 +184,7 @@ app.post("/api/edit", ensureAuthenticated, upload.single("image"), async (req, r
     }
 });
 
-// Optional: serve frontend (if you want, but you already have separate frontend)
+// Optional: serve frontend (if you keep it, fine; if not, it's harmless)
 app.use(express.static(path.join(__dirname, "..", "frontend")));
 app.get("*", (req, res) => {
     res.sendFile(path.join(__dirname, "..", "frontend", "index.html"));
