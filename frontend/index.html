@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>AI Studio Pro – Fixed CORS & Credits</title>
+    <title>AI Studio Pro – Fully Working</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
-        /* YOUR EXISTING CSS – unchanged, keep it as is */
+        /* Your existing CSS – no changes needed, keep as is */
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Inter', sans-serif;
@@ -149,8 +149,8 @@
     </style>
 </head>
 <body>
-<!-- ========== YOUR COMPLETE HTML STRUCTURE (Navbar, Tabs, etc.) – same as before ========== -->
 <div style="max-width: 1300px; margin: 0 auto;">
+    <!-- Navbar (unchanged) -->
     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; margin-bottom: 2rem;">
         <div style="display: flex; align-items: center; gap: 12px;">
             <div style="width: 44px; height: 44px; background: linear-gradient(135deg, #3b82f6, #a855f7); border-radius: 18px; display: flex; align-items: center; justify-content: center;"><i class="fas fa-brain"></i></div>
@@ -162,12 +162,16 @@
             <div id="userAvatarBtn" style="cursor:pointer; background:#2d3a5e; border-radius: 50%; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center;"><i class="fas fa-user-astronaut"></i></div>
         </div>
     </div>
+
+    <!-- Tabs (unchanged) -->
     <div class="tabs">
         <button class="tab active" data-tab="generate">🎨 Generate</button>
         <button class="tab" data-tab="edit">✏️ Edit / Face</button>
         <button class="tab" data-tab="gallery">🖼️ Gallery</button>
         <button class="tab" data-tab="dashboard">📊 Dashboard</button>
     </div>
+
+    <!-- Generate Tab (unchanged) -->
     <div id="generateTab" class="tab-pane">
         <div class="glass-card" style="padding: 1.8rem;">
             <h3>✨ Text‑to‑Image (Flux Dev)</h3>
@@ -186,6 +190,8 @@
         <div id="genLoader" class="loader"><div class="spinner"></div><p>Generating...</p></div>
         <div id="genResult" style="display:none; text-align:center;"><img id="genImage" class="result-img"><br><button id="downloadGenBtn" class="btn-secondary">Download</button> <button id="saveGenBtn" class="btn-secondary">Save to gallery</button></div>
     </div>
+
+    <!-- Edit Tab (unchanged) -->
     <div id="editTab" class="tab-pane" style="display:none;">
         <div class="glass-card" style="padding:1.8rem;">
             <h3>🖌️ Face‑preserving editor</h3>
@@ -197,9 +203,13 @@
         <div id="editLoader" class="loader"><div class="spinner"></div><p>Editing...</p></div>
         <div id="editResult" style="display:none; text-align:center;"><img id="editResultImg" class="result-img"><br><button id="downloadEditBtn" class="btn-secondary">Download</button> <button id="saveEditBtn" class="btn-secondary">Save to gallery</button></div>
     </div>
+
+    <!-- Gallery Tab (unchanged) -->
     <div id="galleryTab" class="tab-pane" style="display:none;">
         <div class="glass-card" style="padding:1.8rem;"><h3>🖼️ Your gallery</h3><div id="galleryContainer" class="gallery-grid"><p>No saved images</p></div></div>
     </div>
+
+    <!-- Dashboard Tab (unchanged) -->
     <div id="dashboardTab" class="tab-pane" style="display:none;">
         <div class="glass-card" style="padding:1.8rem;">
             <h3>📈 Dashboard</h3>
@@ -255,7 +265,7 @@
     </div>
 </div>
 
-<!-- Payment Modal (Stripe Elements) -->
+<!-- Payment Modal (unchanged) -->
 <div id="paymentModal" class="modal-overlay">
     <div class="modal-content" style="text-align: left;">
         <h3>💳 Secure Checkout</h3>
@@ -290,7 +300,7 @@
     import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut, updateProfile, sendPasswordResetEmail } from "firebase/auth";
     import { getFirestore, doc, getDoc, setDoc, updateDoc, increment, serverTimestamp } from "firebase/firestore";
 
-    // ✅ Backend URL – must be your actual Render backend
+    // 👇 YOUR BACKEND URL (must be correct)
     const API_BASE = "https://ai-studio-pro-lquw.onrender.com/api";
 
     const firebaseConfig = {
@@ -322,6 +332,7 @@
     let clientSecret = null;
     let pendingPlan = null;
 
+    // ---------- Toast ----------
     function showToast(msg, isErr = false) {
         const toast = document.createElement("div");
         toast.className = "toast";
@@ -330,13 +341,13 @@
         setTimeout(() => toast.remove(), 3000);
     }
 
-    // ---------- Firestore helpers ----------
+    // ---------- Firestore sync (credits persist across logouts) ----------
     async function syncCreditsFromFirestore() {
         if (!currentUser) return;
         const userRef = doc(db, "users", currentUser.uid);
         const snap = await getDoc(userRef);
         if (snap.exists()) {
-            credits = snap.data().credits || 20;
+            credits = snap.data().credits ?? 20;
             lastDaily = snap.data().lastDailyClaim;
         } else {
             await setDoc(userRef, { credits: 20, lastDailyClaim: null, createdAt: serverTimestamp() });
@@ -347,7 +358,6 @@
 
     async function loadUserFromFirestore() {
         await syncCreditsFromFirestore();
-        // Load gallery from localStorage (kept for images)
         const savedGallery = localStorage.getItem(`gallery_${currentUser.uid}`);
         gallery = savedGallery ? JSON.parse(savedGallery) : [];
         totalGenerations = parseInt(localStorage.getItem(`total_generations_${currentUser.uid}`) || "0");
@@ -355,13 +365,7 @@
         updateUI();
     }
 
-    async function saveUserCreditsToFirestore() {
-        if (!currentUser) return;
-        const userRef = doc(db, "users", currentUser.uid);
-        await updateDoc(userRef, { credits: credits });
-    }
-
-    // ---------- Daily reward (calls backend, then syncs) ----------
+    // ---------- Daily reward (calls backend) ----------
     async function claimDaily() {
         if (!currentUser) {
             showToast("Please sign in first", true);
@@ -376,10 +380,10 @@
             const data = await res.json();
             if (res.ok) {
                 credits = data.credits;
-                lastDaily = new Date().toDateString(); // set locally for timer
+                lastDaily = new Date().toDateString();
                 updateUI();
                 showToast(data.message);
-                // Also sync from Firestore to be absolutely sure
+                // ensure Firestore is in sync
                 await syncCreditsFromFirestore();
             } else {
                 showToast(data.error, true);
@@ -390,25 +394,7 @@
         }
     }
 
-    // ---------- Auth & Firestore sync ----------
-    onAuthStateChanged(auth, async (user) => {
-        currentUser = user;
-        if (user) {
-            idToken = await user.getIdToken();
-            await loadUserFromFirestore();
-            updateNavbarAfterLogin(user);
-            closeAuthModal();
-        } else {
-            idToken = null;
-            updateNavbarAfterLogin(null);
-            credits = 0;
-            gallery = [];
-            updateUI();
-            openAuthModal();
-        }
-    });
-
-    // ---------- Stripe (unchanged, works with API_BASE) ----------
+    // ---------- Stripe ----------
     async function initStripe() {
         try {
             const res = await fetch(`${API_BASE}/stripe-key`);
@@ -487,7 +473,7 @@
         }
     }
 
-    // ---------- AI, gallery, UI helpers (unchanged but ensure they update Firestore) ----------
+    // ---------- AI and gallery helpers (same as before, but with Firestore updates) ----------
     async function generate() {
         if (!currentUser) { showToast("Please sign in first", true); return; }
         const prompt = document.getElementById("genPrompt").value.trim();
@@ -559,7 +545,25 @@
         return res;
     }
 
-    // ---------- All other existing UI helpers (updateUI, setDailyTimer, renderGallery, etc.) – unchanged ----------
+    async function enhancePrompt() {
+        const prompt = document.getElementById("genPrompt").value;
+        if (!prompt) return;
+        showToast("Enhancing...");
+        setTimeout(() => {
+            document.getElementById("genPrompt").value = prompt + ", ultra detailed, 4k, masterpiece";
+            showToast("Enhanced");
+        }, 500);
+    }
+
+    function saveCurrentToGallery(isEdited = false) {
+        const img = isEdited ? currentEditImg : currentGenImage;
+        if (!img) { showToast("No image to save", true); return; }
+        gallery.unshift(img);
+        localStorage.setItem(`gallery_${currentUser.uid}`, JSON.stringify(gallery));
+        renderGallery();
+        showToast("Saved to gallery");
+    }
+
     function updateUI() {
         document.getElementById("creditDisplay").innerText = credits;
         if (document.getElementById("dashCredits")) document.getElementById("dashCredits").innerText = credits;
@@ -676,6 +680,7 @@
             } else {
                 showToast(err.message, true);
             }
+            document.getElementById("googleErrorMsg").innerText = err.message;
         }
     }
 
@@ -686,7 +691,11 @@
         window.location.reload();
     }
 
-    document.getElementById("forgotPasswordLink")?.addEventListener("click", (e) => e.preventDefault() & (document.getElementById("forgotPasswordForm").style.display = "block"));
+    // Forgot password
+    document.getElementById("forgotPasswordLink")?.addEventListener("click", (e) => {
+        e.preventDefault();
+        document.getElementById("forgotPasswordForm").style.display = "block";
+    });
     document.getElementById("sendResetBtn")?.addEventListener("click", async () => {
         const email = document.getElementById("resetEmail").value.trim();
         if (!email) { showToast("Enter your email address", true); return; }
@@ -702,9 +711,29 @@
         document.getElementById("resetEmail").value = "";
     });
 
-    // Event listeners for UI (tabs, style cards, upload zone – same as before)
+    // Auth state
+    onAuthStateChanged(auth, async (user) => {
+        currentUser = user;
+        if (user) {
+            idToken = await user.getIdToken();
+            await loadUserFromFirestore();
+            updateNavbarAfterLogin(user);
+            closeAuthModal();
+        } else {
+            idToken = null;
+            updateNavbarAfterLogin(null);
+            credits = 0;
+            gallery = [];
+            updateUI();
+            openAuthModal();
+        }
+    });
+
+    // UI listeners
+    function openAuthModal() { document.getElementById("authModal").classList.add("active"); }
+    function closeAuthModal() { document.getElementById("authModal").classList.remove("active"); }
+
     document.addEventListener("DOMContentLoaded", () => {
-        // Avatar menu
         document.getElementById("userAvatarBtn")?.addEventListener("click", () => {
             if (currentUser) {
                 const existing = document.querySelector(".user-menu");
@@ -804,11 +833,6 @@
 
         initStripe();
     });
-
-    function openAuthModal() { document.getElementById("authModal").classList.add("active"); }
-    function closeAuthModal() { document.getElementById("authModal").classList.remove("active"); }
-    function enhancePrompt() { /* existing enhance prompt logic */ }
-    function saveCurrentToGallery(isEdited) { /* existing save to gallery logic */ }
 </script>
 </body>
 </html>
