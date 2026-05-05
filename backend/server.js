@@ -8,20 +8,18 @@ const FormData = require("form-data");
 const axios = require("axios");
 const fal = require("@fal-ai/serverless-client");
 const admin = require("firebase-admin");
-const path = require("path");
 const Stripe = require("stripe");
 
 const app = express();
-const PORT = process.env.PORT || 3000;
 
-// ========== STRONG CORS – allow any origin ==========
-app.use(cors({ origin: "*", methods: ["GET", "POST", "OPTIONS"], allowedHeaders: ["Content-Type", "Authorization"] }));
-app.options('*', cors());
-
+// ========== STRONG CORS – allows any origin ==========
+app.use(cors({ origin: "*" }));
+app.options("*", cors());
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// ========== Stripe ==========
+// ========== Environment & Keys ==========
+const PORT = process.env.PORT || 3000;
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const STRIPE_PUBLISHABLE_KEY = process.env.STRIPE_PUBLISHABLE_KEY;
 if (!STRIPE_SECRET_KEY) console.error("❌ STRIPE_SECRET_KEY missing");
@@ -44,7 +42,7 @@ try {
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-// ========== Auth middleware ==========
+// ========== Authentication Middleware ==========
 async function ensureAuthenticated(req, res, next) {
     if (req.method === 'OPTIONS') return next();
     const authHeader = req.headers.authorization;
@@ -61,12 +59,12 @@ async function ensureAuthenticated(req, res, next) {
     }
 }
 
-// ========== 1. Stripe key ==========
+// ========== 1. Stripe – return publishable key ==========
 app.get("/api/stripe-key", (req, res) => {
     res.json({ publishableKey: STRIPE_PUBLISHABLE_KEY });
 });
 
-// ========== 2. Create payment intent ==========
+// ========== 2. Stripe – create payment intent ==========
 app.post("/api/create-payment-intent", ensureAuthenticated, async (req, res) => {
     try {
         const { amount, credits, planName } = req.body;
@@ -84,7 +82,7 @@ app.post("/api/create-payment-intent", ensureAuthenticated, async (req, res) => 
     }
 });
 
-// ========== 3. Daily reward ==========
+// ========== 3. Daily reward (with token authentication) ==========
 app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
     try {
         const userId = req.user.uid;
@@ -118,7 +116,7 @@ app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
     }
 });
 
-// ========== 4. Get user credits ==========
+// ========== 4. Get user credits (optional) ==========
 app.get("/api/user/credits", ensureAuthenticated, async (req, res) => {
     try {
         const userId = req.user.uid;
@@ -134,7 +132,7 @@ app.get("/api/user/credits", ensureAuthenticated, async (req, res) => {
     }
 });
 
-// ========== 5. AI endpoints (generate, edit) – keep your existing code ==========
+// ========== 5. AI endpoints (unchanged, but with ensureAuthenticated) ==========
 function shouldPreserveHairstyle(promptText) {
     const lower = promptText.toLowerCase();
     const changeKeywords = ["change hair", "different hair", "new hair", "different hairstyle", "new hairstyle", "change hairstyle", "alter hair", "modify hair", "different haircut", "new haircut"];
@@ -189,10 +187,5 @@ app.post("/api/edit", ensureAuthenticated, upload.single("image"), async (req, r
     }
 });
 
-// Serve static frontend (optional)
-app.use(express.static(path.join(__dirname, "..", "frontend")));
-app.get("*", (req, res) => {
-    res.sendFile(path.join(__dirname, "..", "frontend", "index.html"));
-});
-
+// ========== Start server ==========
 app.listen(PORT, () => console.log(`🚀 Backend running on http://localhost:${PORT}`));
