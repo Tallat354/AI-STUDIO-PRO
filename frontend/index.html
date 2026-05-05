@@ -7,6 +7,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
+        /* Your existing CSS – unchanged */
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Inter', sans-serif;
@@ -592,7 +593,6 @@
         }
     }
 
-    // === NEW: handle backend payment success ===
     async function handlePaymentSuccess(creditsAmount, plan = null) {
         if (!currentUser) {
             console.error("No user logged in");
@@ -633,10 +633,8 @@
             showToast(error.message, true);
             document.getElementById("card-errors").innerText = error.message;
         } else if (paymentIntent.status === "succeeded") {
-            // First, update backend Firestore
             const updated = await handlePaymentSuccess(pendingPlan.creditsAmt, pendingPlan.plan);
             if (updated) {
-                // Then update local state
                 credits += pendingPlan.creditsAmt;
                 subscription.plan = pendingPlan.plan;
                 const expiry = new Date();
@@ -655,15 +653,36 @@
         }
     }
 
-    function claimDaily() {
-        if (!currentUser) { showToast("Please sign in first", true); return; }
-        const now = Date.now();
-        if (lastDaily && now - lastDaily < 86400000) { showToast("Already claimed today", true); return; }
-        credits += 10;
-        lastDaily = now;
-        saveUserData();
-        updateUI();
-        showToast("+10 free credits!");
+    // ========== DAILY REWARD – FIXED (calls backend) ==========
+    async function claimDaily() {
+        if (!currentUser) {
+            showToast("Please sign in first", true);
+            return;
+        }
+
+        try {
+            const res = await fetch(`${API_BASE}/daily-reward`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${idToken}`
+                },
+                body: JSON.stringify({ userId: currentUser.uid })
+            });
+
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || "Failed to claim");
+
+            // Update credits with the value returned from backend
+            credits = data.newCredits;
+            // Also update local storage to reflect the new Firestore value
+            localStorage.setItem(`credits_${currentUser.uid}`, credits);
+            updateUI();
+            showToast(data.message);
+        } catch (err) {
+            console.error("Daily reward error:", err);
+            showToast(err.message, true);
+        }
     }
 
     // ---------- AI API calls ----------
@@ -831,7 +850,7 @@
         document.getElementById("saveEditBtn")?.addEventListener("click", () => saveCurrentToGallery(true));
         document.getElementById("downloadGenBtn")?.addEventListener("click", () => currentGenImage && downloadUrl(currentGenImage));
         document.getElementById("downloadEditBtn")?.addEventListener("click", () => currentEditImg && downloadUrl(currentEditImg));
-        document.getElementById("dailyRewardBtn")?.addEventListener("click", claimDaily);
+        document.getElementById("dailyRewardBtn")?.addEventListener("click", claimDaily);   // ✅ Updated
 
         document.querySelectorAll(".subscribeBtn").forEach(btn => {
             btn.addEventListener("click", () => {
