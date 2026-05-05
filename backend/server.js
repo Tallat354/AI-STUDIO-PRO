@@ -12,37 +12,43 @@ const Stripe = require("stripe");
 const PORT = process.env.PORT || 3000;
 const app = express();
 
+// CORS – sab allow
 app.use(cors({ origin: "*" }));
 app.options("*", cors());
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// -----------------------------
-// Stripe & Fal.ai
-// -----------------------------
+// Stripe
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
+// FAL.AI
 if (process.env.FAL_KEY) fal.config({ credentials: process.env.FAL_KEY });
 
 // -----------------------------
-// Firebase Admin (collection: "users")
+// FIREBASE ADMIN – (collection "users")
 // -----------------------------
 let db = null;
 let adminAuth = null;
 try {
-  const firebaseConfig = JSON.parse(process.env.FIREBASE_CONFIG);
-  if (firebaseConfig && firebaseConfig.project_id) {
-    admin.initializeApp({ credential: admin.credential.cert(firebaseConfig) });
-    db = admin.firestore();
-    adminAuth = admin.auth();
-    console.log("✅ Firebase Admin connected (collection: users)");
+  const rawConfig = process.env.FIREBASE_CONFIG;
+  if (!rawConfig) {
+    console.error("❌ FIREBASE_CONFIG environment variable missing!");
   } else {
-    console.warn("⚠️ Firebase config incomplete – missing project_id");
+    const firebaseConfig = JSON.parse(rawConfig);
+    if (firebaseConfig && firebaseConfig.project_id) {
+      admin.initializeApp({ credential: admin.credential.cert(firebaseConfig) });
+      db = admin.firestore();
+      adminAuth = admin.auth();
+      console.log("✅ Firebase Admin connected (collection: users)");
+    } else {
+      console.error("❌ FIREBASE_CONFIG missing 'project_id'");
+    }
   }
 } catch (err) {
-  console.warn("⚠️ Firebase config parse error:", err.message);
+  console.error("❌ Firebase config parse error:", err.message);
 }
 
-// Helper: ensure user document exists with 20 credits
+// Helper – ensure user document exists with 20 credits
 async function ensureUserDocument(uid) {
   if (!db) throw new Error("Firestore not available");
   const userRef = db.collection("users").doc(uid);
@@ -53,13 +59,13 @@ async function ensureUserDocument(uid) {
       lastDailyClaim: null,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
-    console.log(`✅ Created new user doc for ${uid} with 20 credits`);
+    console.log(`✅ New user ${uid} created with 20 credits`);
     return { credits: 20, lastDailyClaim: null };
   }
   return docSnap.data();
 }
 
-// Authentication middleware (verifies token + auto-creates user)
+// 🔥 AUTH MIDDLEWARE – token verify + user create
 async function ensureAuthenticated(req, res, next) {
   if (req.method === "OPTIONS") return next();
   if (!adminAuth) {
@@ -67,7 +73,6 @@ async function ensureAuthenticated(req, res, next) {
   }
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    console.error("❌ No Bearer token");
     return res.status(401).json({ error: "No token provided" });
   }
   const idToken = authHeader.split(" ")[1];
@@ -82,9 +87,20 @@ async function ensureAuthenticated(req, res, next) {
   }
 }
 
-// Test endpoint to verify token
+// Test endpoint – check if Firebase is working
+app.get("/api/firebase-test", async (req, res) => {
+  if (!db) return res.status(500).json({ error: "Firestore not available" });
+  try {
+    const testDoc = await db.collection("users").doc("test").get();
+    res.json({ success: true, message: "Firebase is working!" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Test endpoint – verify token (frontend se call karna)
 app.get("/api/verify-token", ensureAuthenticated, (req, res) => {
-  res.json({ success: true, uid: req.user.uid, message: "Token is valid" });
+  res.json({ success: true, uid: req.user.uid });
 });
 
 // Stripe endpoints
@@ -208,7 +224,6 @@ app.post("/api/edit", ensureAuthenticated, upload.single("image"), async (req, r
 const frontendPath = path.join(__dirname, "../frontend");
 if (!fs.existsSync(frontendPath)) {
   console.error(`❌ Frontend not found at ${frontendPath}`);
-  console.error("   Expected: backend/server.js  and  frontend/index.html as siblings");
 } else {
   console.log(`✅ Serving frontend from ${frontendPath}`);
 }
