@@ -11,42 +11,41 @@ const admin = require("firebase-admin");
 const path = require("path");
 const Stripe = require("stripe");
 
+const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Load environment variables
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const STRIPE_PUBLISHABLE_KEY = process.env.STRIPE_PUBLISHABLE_KEY;
+const FAL_KEY = process.env.FAL_KEY;
 
-console.log("Stripe keys loaded:", !!STRIPE_PUBLISHABLE_KEY, !!STRIPE_SECRET_KEY);
-
+// Initialize Stripe
+if (!STRIPE_SECRET_KEY) console.error("❌ STRIPE_SECRET_KEY missing");
 const stripe = new Stripe(STRIPE_SECRET_KEY);
-fal.config({ credentials: process.env.FAL_KEY });
+fal.config({ credentials: FAL_KEY });
 
-// ---------- Firebase Admin ----------
+// Firebase Admin
 let db = null;
 try {
     const firebaseConfig = JSON.parse(process.env.FIREBASE_CONFIG);
     if (firebaseConfig && firebaseConfig.project_id) {
-        if (!admin.apps.length) {
-            admin.initializeApp({
-                credential: admin.credential.cert(firebaseConfig)
-            });
-        }
+        admin.initializeApp({ credential: admin.credential.cert(firebaseConfig) });
         db = admin.firestore();
-        console.log("✅ Firebase Admin connected to Firestore");
+        console.log("✅ Firebase Admin connected");
     } else {
-        console.warn("⚠️ Invalid FIREBASE_CONFIG – token verification will fail");
+        console.warn("⚠️ Firebase Admin not configured");
     }
 } catch (err) {
-    console.warn("⚠️ FIREBASE_CONFIG parse error – token verification will fail", err.message);
+    console.warn("⚠️ Firebase Config error", err.message);
 }
 
-const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// ---------- Auth middleware ----------
+// ========== Auth middleware ==========
 async function ensureAuthenticated(req, res, next) {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -66,7 +65,7 @@ async function ensureAuthenticated(req, res, next) {
     }
 }
 
-// ========== STRIPE ROUTES ==========
+// ========== Stripe routes ==========
 app.get("/api/stripe-key", (req, res) => {
     res.json({ publishableKey: STRIPE_PUBLISHABLE_KEY });
 });
@@ -78,7 +77,7 @@ app.post("/api/create-payment-intent", ensureAuthenticated, async (req, res) => 
         const paymentIntent = await stripe.paymentIntents.create({
             amount: Math.round(amount * 100),
             currency: "usd",
-            payment_method_types: ["card"],
+            payment_method_types: ['card'],
             metadata: { credits: String(credits), planName }
         });
         res.json({ clientSecret: paymentIntent.client_secret });
@@ -88,85 +87,67 @@ app.post("/api/create-payment-intent", ensureAuthenticated, async (req, res) => 
     }
 });
 
-// ========== PAYMENT SUCCESS (safe transaction) ==========
-app.post("/api/payment-success", ensureAuthenticated, async (req, res) => {
-    console.log("🔥 Payment success hit", req.body);
+// ========== Daily reward (fixed) ==========
+app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
     try {
-        const { userId, credits, plan } = req.body;
-        if (!userId || !credits) return res.status(400).json({ error: "Missing data" });
+        const userId = req.user.uid;
+        const today = new Date().toDateString();
 
         const userRef = db.collection("users").doc(userId);
-        await db.runTransaction(async (t) => {
-            const doc = await t.get(userRef);
-            if (!doc.exists) {
-                t.set(userRef, { credits: 20, createdAt: admin.firestore.FieldValue.serverTimestamp() });
-            }
-            t.update(userRef, { credits: admin.firestore.FieldValue.increment(parseInt(credits)) });
-        });
+        const userDoc = await userRef.get();
 
-        if (plan) {
-            let days = 0, planName = "";
-            if (plan === "weekly") { days = 7; planName = "weekly"; }
-            else if (plan === "15days") { days = 15; planName = "15days"; }
-            else if (plan === "monthly") { days = 30; planName = "monthly"; }
-            if (days > 0) {
-                const expiresAt = new Date();
-                expiresAt.setDate(expiresAt.getDate() + days);
-                await userRef.set({ subscriptionPlan: planName, subscriptionExpiry: expiresAt }, { merge: true });
-            }
+        if (!userDoc.exists) {
+            // Create document if it doesn't exist (initial credits 20)
+            await userRef.set({
+                credits: 20,
+                lastDailyClaim: null,
+                createdAt: admin.firestore.FieldValue.serverTimestamp()
+            });
+            // Retry after creation
+            return res.status(200).json({ success: true, credits: 20, message: "First daily reward: +20 credits" });
         }
 
-        const newDoc = await userRef.get();
-        res.json({ success: true, newCredits: newDoc.data().credits });
+        const userData = userDoc.data();
+        const lastClaim = userData.lastDailyClaim || null;
+
+        if (lastClaim === today) {
+            return res.status(400).json({ error: "Daily reward already claimed today" });
+        }
+
+        // Increment credits by 10 and update last claim date
+        await userRef.update({
+            credits: admin.firestore.FieldValue.increment(10),
+            lastDailyClaim: today
+        });
+
+        const updatedDoc = await userRef.get();
+        const newCredits = updatedDoc.data().credits || 0;
+
+        res.json({ success: true, credits: newCredits, message: "+10 credits added" });
     } catch (err) {
-        console.error("Payment success error:", err);
+        console.error("Daily reward error:", err);
         res.status(500).json({ error: err.message });
     }
 });
 
-// ========== DAILY REWARD (safe transaction) ==========
-app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
-    console.log("🔥 Daily reward hit", req.body);
+// ========== Get user credits ==========
+app.get("/api/user/credits", ensureAuthenticated, async (req, res) => {
     try {
-        const { userId } = req.body;
-        if (!userId) return res.status(400).json({ error: "Missing userId" });
-
+        const userId = req.user.uid;
         const userRef = db.collection("users").doc(userId);
-        let newCredits = 0;
-        await db.runTransaction(async (t) => {
-            const doc = await t.get(userRef);
-            const now = Date.now();
-            const lastClaim = doc.exists ? doc.data().lastDailyReward : null;
-            const oneDay = 24 * 60 * 60 * 1000;
-
-            if (lastClaim && (now - lastClaim) < oneDay) {
-                const hoursLeft = Math.ceil((oneDay - (now - lastClaim)) / (3600000));
-                throw new Error(`Already claimed! Next in ${hoursLeft} hours.`);
-            }
-
-            if (!doc.exists) {
-                t.set(userRef, { credits: 20, lastDailyReward: now, createdAt: admin.firestore.FieldValue.serverTimestamp() });
-                newCredits = 30;
-            } else {
-                t.update(userRef, {
-                    credits: admin.firestore.FieldValue.increment(10),
-                    lastDailyReward: now
-                });
-                newCredits = (doc.data().credits || 0) + 10;
-            }
-        });
-        const finalDoc = await userRef.get();
-        res.json({ success: true, newCredits: finalDoc.data().credits });
-    } catch (err) {
-        console.error("Daily reward error:", err.message);
-        if (err.message.includes("Already claimed")) {
-            return res.status(400).json({ error: err.message, alreadyClaimed: true });
+        const userDoc = await userRef.get();
+        if (!userDoc.exists) {
+            await userRef.set({ credits: 20, createdAt: admin.firestore.FieldValue.serverTimestamp() });
+            return res.json({ credits: 20 });
         }
-        res.status(500).json({ error: "Failed to claim reward" });
+        const credits = userDoc.data().credits || 0;
+        res.json({ credits });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
 });
 
-// ========== AI endpoints (unchanged) ==========
+// ========== AI endpoints (generate, edit) – original, unchanged ==========
 function shouldPreserveHairstyle(promptText) {
     const lower = promptText.toLowerCase();
     const changeKeywords = ["change hair", "different hair", "new hair", "different hairstyle", "new hairstyle", "change hairstyle", "alter hair", "modify hair", "different haircut", "new haircut"];
@@ -213,7 +194,7 @@ app.post("/api/edit", ensureAuthenticated, upload.single("image"), async (req, r
             }
         });
         const imageUrl = result?.data?.image?.url || result?.data?.images?.[0]?.url || result?.image?.url || result?.images?.[0]?.url;
-        if (!imageUrl) return res.status(500).json({ error: "No edited image URL" });
+        if (!imageUrl) return res.status(500).json({ error: "No edited image" });
         res.json({ success: true, imageUrl });
     } catch (err) {
         console.error("Edit error:", err.message);
@@ -221,7 +202,7 @@ app.post("/api/edit", ensureAuthenticated, upload.single("image"), async (req, r
     }
 });
 
-// Serve frontend
+// ========== Serve frontend static files ==========
 app.use(express.static(path.join(__dirname, "..", "frontend")));
 app.get("*", (req, res) => {
     res.sendFile(path.join(__dirname, "..", "frontend", "index.html"));
