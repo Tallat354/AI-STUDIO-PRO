@@ -17,14 +17,14 @@ app.options("*", cors());
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// Stripe
+// -----------------------------
+// Stripe & Fal.ai
+// -----------------------------
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-
-// Fal.ai
 if (process.env.FAL_KEY) fal.config({ credentials: process.env.FAL_KEY });
 
 // -----------------------------
-// Firebase Admin (collection "users")
+// Firebase Admin (collection: "users")
 // -----------------------------
 let db = null;
 let adminAuth = null;
@@ -36,7 +36,7 @@ try {
     adminAuth = admin.auth();
     console.log("✅ Firebase Admin connected (collection: users)");
   } else {
-    console.warn("⚠️ Firebase config incomplete");
+    console.warn("⚠️ Firebase config incomplete – missing project_id");
   }
 } catch (err) {
   console.warn("⚠️ Firebase config parse error:", err.message);
@@ -59,7 +59,7 @@ async function ensureUserDocument(uid) {
   return docSnap.data();
 }
 
-// Authentication middleware (refreshed token)
+// Authentication middleware (verifies token + auto-creates user)
 async function ensureAuthenticated(req, res, next) {
   if (req.method === "OPTIONS") return next();
   if (!adminAuth) {
@@ -67,6 +67,7 @@ async function ensureAuthenticated(req, res, next) {
   }
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    console.error("❌ No Bearer token");
     return res.status(401).json({ error: "No token provided" });
   }
   const idToken = authHeader.split(" ")[1];
@@ -76,14 +77,14 @@ async function ensureAuthenticated(req, res, next) {
     await ensureUserDocument(decoded.uid);
     next();
   } catch (err) {
-    console.error("Token verification failed:", err.message);
+    console.error("❌ Token verification failed:", err.code, err.message);
     return res.status(401).json({ error: "Invalid token", details: err.message });
   }
 }
 
 // Test endpoint to verify token
 app.get("/api/verify-token", ensureAuthenticated, (req, res) => {
-  res.json({ success: true, uid: req.user.uid });
+  res.json({ success: true, uid: req.user.uid, message: "Token is valid" });
 });
 
 // Stripe endpoints
@@ -207,6 +208,7 @@ app.post("/api/edit", ensureAuthenticated, upload.single("image"), async (req, r
 const frontendPath = path.join(__dirname, "../frontend");
 if (!fs.existsSync(frontendPath)) {
   console.error(`❌ Frontend not found at ${frontendPath}`);
+  console.error("   Expected: backend/server.js  and  frontend/index.html as siblings");
 } else {
   console.log(`✅ Serving frontend from ${frontendPath}`);
 }
@@ -217,5 +219,5 @@ app.get("*", (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`🚀 Backend running on http://localhost:${PORT}`);
-  console.log(`   Collection: "users"`);
+  console.log(`   Firestore collection: "users"`);
 });
