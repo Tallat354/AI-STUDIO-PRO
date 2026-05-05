@@ -1,7 +1,7 @@
 require("dotenv").config();
 
 const express = require("express");
-const cors = require("cors");               // <-- added
+const cors = require("cors");
 const multer = require("multer");
 const sharp = require("sharp");
 const FormData = require("form-data");
@@ -13,13 +13,14 @@ const Stripe = require("stripe");
 
 const app = express();
 
-// ========== CORS FIX – place BEFORE any routes ==========
+// ========== CORS FIX – allow all origins ==========
 app.use(cors({
-    origin: true,           // reflects request origin (allows any domain)
-    credentials: true,      // allows Authorization header
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+    origin: "*",                         // allow any origin
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"]   // allow Authorization header
 }));
-app.options('*', cors());   // handle preflight requests
+// Handle preflight requests
+app.options('*', cors());
 
 const PORT = process.env.PORT || 3000;
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
@@ -50,7 +51,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// Auth middleware (verify Firebase ID token)
+// Auth middleware (unchanged)
 async function ensureAuthenticated(req, res, next) {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -92,7 +93,7 @@ app.post("/api/create-payment-intent", ensureAuthenticated, async (req, res) => 
     }
 });
 
-// ========== DAILY REWARD (FIXED) ==========
+// ========== DAILY REWARD ==========
 app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
     try {
         const userId = req.user.uid;
@@ -184,7 +185,7 @@ app.post("/api/edit", ensureAuthenticated, upload.single("image"), async (req, r
     }
 });
 
-// Optional: serve frontend (if you keep it, fine; if not, it's harmless)
+// Serve frontend (if your frontend is served from the same backend; otherwise optional)
 app.use(express.static(path.join(__dirname, "..", "frontend")));
 app.get("*", (req, res) => {
     res.sendFile(path.join(__dirname, "..", "frontend", "index.html"));
