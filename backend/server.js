@@ -11,25 +11,23 @@ const admin = require("firebase-admin");
 const path = require("path");
 const Stripe = require("stripe");
 
-// ✅ ONLY ONE PORT DECLARATION (at the top)
 const PORT = process.env.PORT || 3000;
-
 const app = express();
 
-// ========== CORS – allow any origin ==========
+// CORS
 app.use(cors({ origin: "*" }));
 app.options("*", cors());
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// ========== Stripe ==========
+// Stripe
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const STRIPE_PUBLISHABLE_KEY = process.env.STRIPE_PUBLISHABLE_KEY;
 if (!STRIPE_SECRET_KEY) console.error("❌ STRIPE_SECRET_KEY missing");
 const stripe = new Stripe(STRIPE_SECRET_KEY);
 fal.config({ credentials: process.env.FAL_KEY });
 
-// ========== Firebase Admin ==========
+// Firebase Admin
 let db = null;
 try {
     const firebaseConfig = JSON.parse(process.env.FIREBASE_CONFIG);
@@ -44,12 +42,12 @@ try {
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-// ========== Auth middleware ==========
+// Auth middleware
 async function ensureAuthenticated(req, res, next) {
     if (req.method === 'OPTIONS') return next();
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
-        return res.status(401).json({ error: "No token provided" });
+        return res.status(401).json({ error: "No token" });
     }
     const idToken = authHeader.split(" ")[1];
     try {
@@ -61,7 +59,7 @@ async function ensureAuthenticated(req, res, next) {
     }
 }
 
-// ========== Stripe endpoints ==========
+// Stripe endpoints
 app.get("/api/stripe-key", (req, res) => {
     res.json({ publishableKey: STRIPE_PUBLISHABLE_KEY });
 });
@@ -82,7 +80,7 @@ app.post("/api/create-payment-intent", ensureAuthenticated, async (req, res) => 
     }
 });
 
-// ========== Daily reward ==========
+// Daily reward
 app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
     try {
         const userId = req.user.uid;
@@ -116,7 +114,7 @@ app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
     }
 });
 
-// ========== AI endpoints ==========
+// AI endpoints (unchanged)
 function shouldPreserveHairstyle(promptText) {
     const lower = promptText.toLowerCase();
     const changeKeywords = ["change hair", "different hair", "new hair", "different hairstyle", "new hairstyle", "change hairstyle", "alter hair", "modify hair", "different haircut", "new haircut"];
@@ -171,11 +169,10 @@ app.post("/api/edit", ensureAuthenticated, upload.single("image"), async (req, r
     }
 });
 
-// ========== Serve frontend static files ==========
-app.use(express.static(path.join(__dirname, "frontend")));
+// ========== Serve static frontend from "public" folder ==========
+app.use(express.static(path.join(__dirname, "public")));
 app.get("*", (req, res) => {
-    res.sendFile(path.join(__dirname, "frontend", "index.html"));
+    res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-// ========== Start server – uses the PORT variable declared at the top ==========
 app.listen(PORT, () => console.log(`🚀 Backend running on http://localhost:${PORT}`));
