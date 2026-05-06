@@ -9,7 +9,6 @@ const path = require("path");
 const fs = require("fs");
 const Stripe = require("stripe");
 
-// ========== 1. CONFIGURATION ==========
 const PORT = process.env.PORT || 3000;
 const app = express();
 
@@ -18,41 +17,54 @@ app.options("*", cors());
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// ========== 2. STRIPE INIT ==========
+// ========== STRIPE ==========
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const STRIPE_PUBLISHABLE_KEY = process.env.STRIPE_PUBLISHABLE_KEY;
 if (!STRIPE_SECRET_KEY) console.error("❌ STRIPE_SECRET_KEY missing");
 const stripe = new Stripe(STRIPE_SECRET_KEY);
 
-// ========== 3. FAL.AI CONFIG ==========
+// ========== FAL.AI ==========
 if (process.env.FAL_KEY) {
   fal.config({ credentials: process.env.FAL_KEY });
 } else {
   console.warn("⚠️ FAL_KEY missing – generation will fail");
 }
 
-// ========== 4. FIREBASE ADMIN ==========
+// ========== FIREBASE (with detailed error handling) ==========
 let db = null;
 let adminAuth = null;
-try {
-  const firebaseConfig = JSON.parse(process.env.FIREBASE_CONFIG);
-  if (firebaseConfig && firebaseConfig.project_id) {
-    admin.initializeApp({ credential: admin.credential.cert(firebaseConfig) });
-    db = admin.firestore();
-    adminAuth = admin.auth();
-    console.log("✅ Firebase Admin connected");
-  } else {
-    console.warn("⚠️ Firebase config incomplete – auth/db will fail");
+
+const firebaseConfigRaw = process.env.FIREBASE_CONFIG;
+if (!firebaseConfigRaw) {
+  console.error("❌ FIREBASE_CONFIG environment variable is missing. Add it to .env");
+} else {
+  try {
+    const firebaseConfig = JSON.parse(firebaseConfigRaw);
+    if (firebaseConfig && firebaseConfig.project_id) {
+      admin.initializeApp({ credential: admin.credential.cert(firebaseConfig) });
+      db = admin.firestore();
+      adminAuth = admin.auth();
+      console.log("✅ Firebase Admin connected to project:", firebaseConfig.project_id);
+      // Quick test to verify Firestore access
+      db.collection("users").limit(1).get().catch(err => {
+        console.error("❌ Firestore access error:", err.message);
+        console.error("   Make sure Firestore database exists and rules allow reads.");
+      });
+    } else {
+      console.error("❌ Firebase config missing 'project_id' field");
+    }
+  } catch (err) {
+    console.error("❌ Firebase config JSON parse error:", err.message);
+    console.error("   The FIREBASE_CONFIG must be a valid JSON string on a single line.");
+    console.error("   Use double quotes, no line breaks except \\n inside private_key.");
   }
-} catch (err) {
-  console.warn("⚠️ Firebase config parse error:", err.message);
 }
 
-// ========== 5. AUTH MIDDLEWARE ==========
+// ========== AUTH MIDDLEWARE ==========
 async function ensureAuthenticated(req, res, next) {
   if (req.method === "OPTIONS") return next();
   if (!adminAuth) {
-    return res.status(503).json({ error: "Firebase Auth not configured" });
+    return res.status(503).json({ error: "Firebase Auth not configured. Check .env" });
   }
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -70,7 +82,7 @@ async function ensureAuthenticated(req, res, next) {
 }
 
 async function ensureUserDocument(userId) {
-  if (!db) return null;
+  if (!db) throw new Error("Firestore not available");
   const userRef = db.collection("users").doc(userId);
   const docSnap = await userRef.get();
   if (!docSnap.exists) {
@@ -85,7 +97,7 @@ async function ensureUserDocument(userId) {
   return docSnap.data();
 }
 
-// ========== 6. STRIPE ENDPOINTS ==========
+// ========== STRIPE ENDPOINTS ==========
 app.get("/api/stripe-key", (req, res) => {
   if (!STRIPE_PUBLISHABLE_KEY) {
     return res.status(500).json({ error: "Stripe key not configured" });
@@ -103,11 +115,7 @@ app.post("/api/create-payment-intent", ensureAuthenticated, async (req, res) => 
       amount: Math.round(amount * 100),
       currency: "usd",
       payment_method_types: ["card"],
-      metadata: {
-        credits: String(credits),
-        planName: planName,
-        userId: req.user.uid,
-      },
+      metadata: { credits: String(credits), planName, userId: req.user.uid },
     });
     res.json({ clientSecret: paymentIntent.client_secret });
   } catch (err) {
@@ -116,11 +124,9 @@ app.post("/api/create-payment-intent", ensureAuthenticated, async (req, res) => 
   }
 });
 
-// ========== 7. DAILY REWARD ==========
+// ========== DAILY REWARD ==========
 app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
-  if (!db) {
-    return res.status(503).json({ error: "Firestore not available" });
-  }
+  if (!db) return res.status(503).json({ error: "Firestore not available. Contact support." });
   try {
     const userId = req.user.uid;
     const userRef = db.collection("users").doc(userId);
@@ -148,22 +154,19 @@ app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
     });
 
     const updated = await userRef.get();
-    res.json({
-      success: true,
-      credits: updated.data().credits,
-      message: "+10 credits claimed!"
-    });
+    res.json({ success: true, credits: updated.data().credits, message: "+10 credits claimed!" });
   } catch (err) {
     console.error("Daily reward error:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ========== 8. AI GENERATION ==========
+// ========== AI GENERATION ==========
 app.post("/api/generate", ensureAuthenticated, async (req, res) => {
   try {
     const { prompt, style } = req.body;
     if (!prompt) return res.status(400).json({ error: "Prompt required" });
+    if (!db) return res.status(503).json({ error: "Firestore not available" });
 
     const userId = req.user.uid;
     const userRef = db.collection("users").doc(userId);
@@ -182,19 +185,10 @@ app.post("/api/generate", ensureAuthenticated, async (req, res) => {
     const finalPrompt = `${prompt}, ${styleMap[style] || styleMap.realistic}, masterpiece, ultra detailed, sharp focus`;
 
     const result = await fal.subscribe("fal-ai/flux/dev", {
-      input: {
-        prompt: finalPrompt,
-        image_size: "square_hd",
-        num_images: 1,
-        enable_safety_checker: false,
-      },
+      input: { prompt: finalPrompt, image_size: "square_hd", num_images: 1, enable_safety_checker: false },
     });
 
-    const imageUrl = result?.data?.images?.[0]?.url ||
-      result?.images?.[0]?.url ||
-      result?.data?.image?.url ||
-      result?.image?.url;
-
+    const imageUrl = result?.data?.images?.[0]?.url || result?.images?.[0]?.url || result?.data?.image?.url || result?.image?.url;
     if (!imageUrl) return res.status(500).json({ error: "No image URL" });
 
     await userRef.update({
@@ -203,25 +197,16 @@ app.post("/api/generate", ensureAuthenticated, async (req, res) => {
     });
     const updated = await userRef.get();
 
-    res.json({ 
-      success: true, 
-      imageUrl,
-      credits: updated.data().credits,
-      totalGenerations: updated.data().totalGenerations
-    });
+    res.json({ success: true, imageUrl, credits: updated.data().credits, totalGenerations: updated.data().totalGenerations });
   } catch (err) {
     console.error("Generation error:", err);
-    res.status(500).json({ error: "Generation failed" });
+    res.status(500).json({ error: "Generation failed: " + err.message });
   }
 });
 
 function shouldPreserveHairstyle(promptText) {
   const lower = promptText.toLowerCase();
-  const changeKeywords = [
-    "change hair", "different hair", "new hair", "different hairstyle",
-    "new hairstyle", "change hairstyle", "alter hair", "modify hair",
-    "different haircut", "new haircut"
-  ];
+  const changeKeywords = ["change hair", "different hair", "new hair", "different hairstyle", "new hairstyle", "change hairstyle", "alter hair", "modify hair", "different haircut", "new haircut"];
   return !changeKeywords.some(kw => lower.includes(kw));
 }
 
@@ -230,9 +215,8 @@ const upload = multer({ storage: multer.memoryStorage() });
 app.post("/api/edit", ensureAuthenticated, upload.single("image"), async (req, res) => {
   try {
     const { prompt } = req.body;
-    if (!req.file || !prompt) {
-      return res.status(400).json({ error: "Image and prompt required" });
-    }
+    if (!req.file || !prompt) return res.status(400).json({ error: "Image and prompt required" });
+    if (!db) return res.status(503).json({ error: "Firestore not available" });
 
     const userId = req.user.uid;
     const userRef = db.collection("users").doc(userId);
@@ -242,15 +226,9 @@ app.post("/api/edit", ensureAuthenticated, upload.single("image"), async (req, r
     }
 
     const preserveHair = shouldPreserveHairstyle(prompt);
-    const hairInstruction = preserveHair
-      ? "preserve exact hairstyle"
-      : "change hairstyle according to the description";
+    const hairInstruction = preserveHair ? "preserve exact hairstyle" : "change hairstyle according to the description";
 
-    const imageBuffer = await sharp(req.file.buffer)
-      .resize(1024, 1024, { fit: "cover" })
-      .jpeg({ quality: 100 })
-      .toBuffer();
-
+    const imageBuffer = await sharp(req.file.buffer).resize(1024, 1024, { fit: "cover" }).jpeg({ quality: 100 }).toBuffer();
     const fileBlob = new Blob([imageBuffer], { type: "image/jpeg" });
     const uploadedUrl = await fal.storage.upload(fileBlob);
 
@@ -261,30 +239,23 @@ app.post("/api/edit", ensureAuthenticated, upload.single("image"), async (req, r
       },
     });
 
-    const imageUrl = result?.data?.image?.url ||
-      result?.data?.images?.[0]?.url ||
-      result?.image?.url ||
-      result?.images?.[0]?.url;
-
+    const imageUrl = result?.data?.image?.url || result?.data?.images?.[0]?.url || result?.image?.url || result?.images?.[0]?.url;
     if (!imageUrl) return res.status(500).json({ error: "No edited image" });
 
     await userRef.update({ credits: admin.firestore.FieldValue.increment(-2) });
     const updated = await userRef.get();
 
-    res.json({ 
-      success: true, 
-      imageUrl,
-      credits: updated.data().credits
-    });
+    res.json({ success: true, imageUrl, credits: updated.data().credits });
   } catch (err) {
     console.error("Edit error:", err);
-    res.status(500).json({ error: "Editing failed" });
+    res.status(500).json({ error: "Editing failed: " + err.message });
   }
 });
 
-// ========== 9. GALLERY ENDPOINTS ==========
+// ========== GALLERY ENDPOINTS ==========
 app.get("/api/gallery", ensureAuthenticated, async (req, res) => {
   try {
+    if (!db) throw new Error("Firestore not available");
     const userId = req.user.uid;
     const galleryRef = db.collection("users").doc(userId).collection("gallery");
     const snapshot = await galleryRef.orderBy("createdAt", "desc").get();
@@ -301,12 +272,10 @@ app.post("/api/gallery/add", ensureAuthenticated, async (req, res) => {
   try {
     const { imageUrl } = req.body;
     if (!imageUrl) return res.status(400).json({ error: "No image URL" });
+    if (!db) throw new Error("Firestore not available");
     const userId = req.user.uid;
     const galleryRef = db.collection("users").doc(userId).collection("gallery");
-    await galleryRef.add({
-      url: imageUrl,
-      createdAt: admin.firestore.FieldValue.serverTimestamp()
-    });
+    await galleryRef.add({ url: imageUrl, createdAt: admin.firestore.FieldValue.serverTimestamp() });
     res.json({ success: true });
   } catch (err) {
     console.error("Add to gallery error:", err);
@@ -316,6 +285,7 @@ app.post("/api/gallery/add", ensureAuthenticated, async (req, res) => {
 
 app.get("/api/user-data", ensureAuthenticated, async (req, res) => {
   try {
+    if (!db) throw new Error("Firestore not available");
     const userId = req.user.uid;
     const userRef = db.collection("users").doc(userId);
     const userSnap = await userRef.get();
@@ -331,11 +301,11 @@ app.get("/api/user-data", ensureAuthenticated, async (req, res) => {
   }
 });
 
-// ========== 10. SERVE FRONTEND ==========
+// ========== SERVE FRONTEND ==========
 const frontendPath = path.join(__dirname, "../frontend");
 if (!fs.existsSync(frontendPath)) {
   console.error(`❌ Frontend folder not found at ${frontendPath}`);
-  console.error("   Expected structure: backend/server.js + frontend/index.html");
+  console.error("   Expected: backend/server.js and frontend/index.html");
   process.exit(1);
 }
 app.use(express.static(frontendPath));
@@ -343,8 +313,9 @@ app.get("*", (req, res) => {
   res.sendFile(path.join(frontendPath, "index.html"));
 });
 
-// ========== 11. START SERVER ==========
+// ========== START SERVER ==========
 app.listen(PORT, () => {
-  console.log(`🚀 Backend running on http://localhost:${PORT}`);
-  console.log(`   Serving static: ${frontendPath}`);
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`   Frontend: ${frontendPath}`);
+  if (!db) console.error("⚠️ Firestore not connected – daily reward & gallery will fail.");
 });
