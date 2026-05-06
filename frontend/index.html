@@ -294,7 +294,8 @@
 
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
-    const db = getFirestore(app);
+    // ✅ FIX: specify database ID 'mydata'
+    const db = getFirestore(app, 'mydata');
 
     let currentUser = null, credits = 0, gallery = [], lastDailyTimestamp = null, totalGenerations = 0;
     let currentGenImage = null, currentEditImg = null, activeStyle = "realistic";
