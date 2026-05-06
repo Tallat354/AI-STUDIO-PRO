@@ -30,7 +30,7 @@ if (process.env.FAL_KEY) {
   console.warn("⚠️ FAL_KEY missing – generation will fail");
 }
 
-// ========== FIREBASE ADMIN (v12+ with databaseId 'mydata') ==========
+// ========== FIREBASE ADMIN ==========
 let db = null;
 let adminAuth = null;
 
@@ -44,14 +44,10 @@ if (!firebaseConfigRaw) {
       admin.initializeApp({
         credential: admin.credential.cert(firebaseConfig),
       });
-      // Create Firestore instance and set database ID
       db = admin.firestore();
       db.settings({ databaseId: 'mydata' });
-      
       adminAuth = admin.auth();
       console.log("✅ Firebase Admin connected to project:", firebaseConfig.project_id);
-      
-      // Test access
       db.collection("users").limit(1).get().catch(err => {
         console.error("❌ Firestore access error:", err.message);
       });
@@ -100,6 +96,22 @@ async function ensureUserDocument(userId) {
   return docSnap.data();
 }
 
+// ========== HELPER: CHECK AND EXPIRE SUBSCRIPTION ==========
+async function checkAndExpireSubscription(userId) {
+  const userRef = db.collection("users").doc(userId);
+  const userSnap = await userRef.get();
+  const userData = userSnap.data();
+  const expiry = userData.subscriptionExpiry;
+  if (expiry && expiry.toDate && expiry.toDate() < new Date()) {
+    await userRef.update({
+      subscriptionPlan: "free",
+      subscriptionExpiry: null
+    });
+    return true;
+  }
+  return false;
+}
+
 // ========== STRIPE ENDPOINTS ==========
 app.get("/api/stripe-key", (req, res) => {
   if (!STRIPE_PUBLISHABLE_KEY) {
@@ -127,7 +139,7 @@ app.post("/api/create-payment-intent", ensureAuthenticated, async (req, res) => 
   }
 });
 
-// ========== ADD CREDITS AFTER PAYMENT (FIX) ==========
+// ========== ADD CREDITS AFTER PAYMENT ==========
 app.post("/api/add-credits", ensureAuthenticated, async (req, res) => {
   try {
     const { credits: creditsToAdd } = req.body;
@@ -135,7 +147,6 @@ app.post("/api/add-credits", ensureAuthenticated, async (req, res) => {
       return res.status(400).json({ error: "Invalid credits amount" });
     }
     if (!db) return res.status(503).json({ error: "Firestore not available" });
-    
     const userId = req.user.uid;
     const userRef = db.collection("users").doc(userId);
     await userRef.update({
@@ -145,6 +156,40 @@ app.post("/api/add-credits", ensureAuthenticated, async (req, res) => {
     res.json({ success: true, credits: updated.data().credits });
   } catch (err) {
     console.error("Add credits error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ========== SAVE SUBSCRIPTION DETAILS ==========
+app.post("/api/save-subscription", ensureAuthenticated, async (req, res) => {
+  try {
+    const { plan, expiry } = req.body;
+    if (!plan || !expiry) return res.status(400).json({ error: "Missing data" });
+    const userId = req.user.uid;
+    const userRef = db.collection("users").doc(userId);
+    await userRef.update({
+      subscriptionPlan: plan,
+      subscriptionExpiry: admin.firestore.Timestamp.fromDate(new Date(expiry))
+    });
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Save subscription error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ========== CHECK SUBSCRIPTION STATUS ==========
+app.post("/api/check-subscription", ensureAuthenticated, async (req, res) => {
+  try {
+    const userId = req.user.uid;
+    await checkAndExpireSubscription(userId);
+    const userRef = db.collection("users").doc(userId);
+    const userSnap = await userRef.get();
+    const userData = userSnap.data();
+    const plan = userData.subscriptionPlan || "free";
+    const expiry = userData.subscriptionExpiry ? userData.subscriptionExpiry.toDate() : null;
+    res.json({ plan, expiry: expiry ? expiry.toISOString() : null });
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
@@ -312,6 +357,7 @@ app.get("/api/user-data", ensureAuthenticated, async (req, res) => {
   try {
     if (!db) throw new Error("Firestore not available");
     const userId = req.user.uid;
+    await checkAndExpireSubscription(userId); // auto-expire if needed
     const userRef = db.collection("users").doc(userId);
     const userSnap = await userRef.get();
     if (!userSnap.exists) {
