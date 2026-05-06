@@ -332,6 +332,11 @@
             credits = data.credits || 20;
             totalGenerations = data.totalGenerations || 0;
             lastDailyTimestamp = data.lastDailyClaim ? (data.lastDailyClaim.toDate?.()?.getTime() || data.lastDailyClaim) : null;
+            // load subscription info
+            const subRes = await fetchWithAuth("/check-subscription", { method: "POST" });
+            const subData = await subRes.json();
+            subscription.plan = subData.plan;
+            subscription.expiry = subData.expiry;
             updateUI();
         } catch(e) { console.error(e); }
     }
@@ -400,7 +405,7 @@
         const { error, paymentIntent } = await stripe.confirmCardPayment(clientSecret, { payment_method: { card } });
         if (error) showToast(error.message, true);
         else if (paymentIntent.status === "succeeded") {
-            // ✅ CALL BACKEND TO ADD CREDITS
+            // add credits
             try {
                 const addRes = await fetchWithAuth("/add-credits", {
                     method: "POST",
@@ -410,24 +415,29 @@
                 if (addRes.ok) {
                     const addData = await addRes.json();
                     credits = addData.credits;
-                } else {
-                    console.error("Failed to add credits after payment");
                 }
-            } catch(e) { console.error("Error adding credits:", e); }
-            // update subscription plan expiry
-            subscription.plan = pendingPlan.plan;
+            } catch(e) { console.error("Add credits error", e); }
+            // save subscription expiry
             const expiry = new Date();
             if (pendingPlan.plan === "weekly") expiry.setDate(expiry.getDate() + 7);
             else if (pendingPlan.plan === "15days") expiry.setDate(expiry.getDate() + 15);
             else if (pendingPlan.plan === "monthly") expiry.setMonth(expiry.getMonth() + 1);
-            subscription.expiry = expiry.toISOString();
+            try {
+                await fetchWithAuth("/save-subscription", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ plan: pendingPlan.plan, expiry: expiry.toISOString() })
+                });
+                subscription.plan = pendingPlan.plan;
+                subscription.expiry = expiry.toISOString();
+            } catch(e) { console.error("Save subscription error", e); }
             updateUI();
             showToast(`Payment successful! +${pendingPlan.creditsAmt} credits`);
             document.getElementById("paymentModal").classList.remove("active");
             card.clear();
             pendingPlan = null;
             clientSecret = null;
-            await loadUserData(); // refresh from db
+            await loadUserData(); // final refresh
         }
     }
     async function generate() {
