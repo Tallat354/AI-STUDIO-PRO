@@ -294,7 +294,6 @@
 
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
-    // ✅ FIX: specify database ID 'mydata'
     const db = getFirestore(app, 'mydata');
 
     let currentUser = null, credits = 0, gallery = [], lastDailyTimestamp = null, totalGenerations = 0;
@@ -401,20 +400,34 @@
         const { error, paymentIntent } = await stripe.confirmCardPayment(clientSecret, { payment_method: { card } });
         if (error) showToast(error.message, true);
         else if (paymentIntent.status === "succeeded") {
-            credits += pendingPlan.creditsAmt;
+            // ✅ CALL BACKEND TO ADD CREDITS
+            try {
+                const addRes = await fetchWithAuth("/add-credits", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ credits: pendingPlan.creditsAmt })
+                });
+                if (addRes.ok) {
+                    const addData = await addRes.json();
+                    credits = addData.credits;
+                } else {
+                    console.error("Failed to add credits after payment");
+                }
+            } catch(e) { console.error("Error adding credits:", e); }
+            // update subscription plan expiry
             subscription.plan = pendingPlan.plan;
             const expiry = new Date();
             if (pendingPlan.plan === "weekly") expiry.setDate(expiry.getDate() + 7);
             else if (pendingPlan.plan === "15days") expiry.setDate(expiry.getDate() + 15);
             else if (pendingPlan.plan === "monthly") expiry.setMonth(expiry.getMonth() + 1);
             subscription.expiry = expiry.toISOString();
-            await loadUserData();
             updateUI();
             showToast(`Payment successful! +${pendingPlan.creditsAmt} credits`);
             document.getElementById("paymentModal").classList.remove("active");
             card.clear();
             pendingPlan = null;
             clientSecret = null;
+            await loadUserData(); // refresh from db
         }
     }
     async function generate() {
