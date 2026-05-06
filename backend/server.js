@@ -30,33 +30,31 @@ if (process.env.FAL_KEY) {
   console.warn("⚠️ FAL_KEY missing – generation will fail");
 }
 
-// ========== FIREBASE (with detailed error handling) ==========
+// ========== FIREBASE ADMIN (with database ID 'mydata') ==========
 let db = null;
 let adminAuth = null;
 
 const firebaseConfigRaw = process.env.FIREBASE_CONFIG;
 if (!firebaseConfigRaw) {
-  console.error("❌ FIREBASE_CONFIG environment variable is missing. Add it to .env");
+  console.error("❌ FIREBASE_CONFIG environment variable is missing.");
 } else {
   try {
     const firebaseConfig = JSON.parse(firebaseConfigRaw);
     if (firebaseConfig && firebaseConfig.project_id) {
       admin.initializeApp({ credential: admin.credential.cert(firebaseConfig) });
-      db = admin.firestore();
+      // ✅ FIX: specify database ID 'mydata'
+      db = admin.firestore({ databaseId: 'mydata' });
       adminAuth = admin.auth();
       console.log("✅ Firebase Admin connected to project:", firebaseConfig.project_id);
-      // Quick test to verify Firestore access
+      // Test access
       db.collection("users").limit(1).get().catch(err => {
         console.error("❌ Firestore access error:", err.message);
-        console.error("   Make sure Firestore database exists and rules allow reads.");
       });
     } else {
-      console.error("❌ Firebase config missing 'project_id' field");
+      console.error("❌ Firebase config missing 'project_id'");
     }
   } catch (err) {
-    console.error("❌ Firebase config JSON parse error:", err.message);
-    console.error("   The FIREBASE_CONFIG must be a valid JSON string on a single line.");
-    console.error("   Use double quotes, no line breaks except \\n inside private_key.");
+    console.error("❌ Firebase config parse error:", err.message);
   }
 }
 
@@ -64,7 +62,7 @@ if (!firebaseConfigRaw) {
 async function ensureAuthenticated(req, res, next) {
   if (req.method === "OPTIONS") return next();
   if (!adminAuth) {
-    return res.status(503).json({ error: "Firebase Auth not configured. Check .env" });
+    return res.status(503).json({ error: "Firebase Auth not configured" });
   }
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -126,7 +124,7 @@ app.post("/api/create-payment-intent", ensureAuthenticated, async (req, res) => 
 
 // ========== DAILY REWARD ==========
 app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
-  if (!db) return res.status(503).json({ error: "Firestore not available. Contact support." });
+  if (!db) return res.status(503).json({ error: "Firestore not available" });
   try {
     const userId = req.user.uid;
     const userRef = db.collection("users").doc(userId);
