@@ -30,7 +30,7 @@ if (process.env.FAL_KEY) {
   console.warn("⚠️ FAL_KEY missing – generation will fail");
 }
 
-// ========== FIREBASE ADMIN (FIXED for v12+) ==========
+// ========== FIREBASE ADMIN (v12+ with databaseId 'mydata') ==========
 let db = null;
 let adminAuth = null;
 
@@ -41,24 +41,17 @@ if (!firebaseConfigRaw) {
   try {
     const firebaseConfig = JSON.parse(firebaseConfigRaw);
     if (firebaseConfig && firebaseConfig.project_id) {
-      // Initialize Firebase Admin (v12+)
       admin.initializeApp({
         credential: admin.credential.cert(firebaseConfig),
       });
-      // Connect to Firestore with database ID 'mydata'
+      // Create Firestore instance and set database ID
       db = admin.firestore();
-      // For Firestore database with custom ID, use this syntax:
-      // db = admin.firestore().databaseId('mydata'); 
-      // But simpler: just use default and then apply settings
-      // Actually in v12+, you can do:
-      // const db = admin.firestore({ databaseId: 'mydata' });
-      // But to avoid any issue, we use settings method:
       db.settings({ databaseId: 'mydata' });
       
       adminAuth = admin.auth();
       console.log("✅ Firebase Admin connected to project:", firebaseConfig.project_id);
       
-      // Test Firestore access
+      // Test access
       db.collection("users").limit(1).get().catch(err => {
         console.error("❌ Firestore access error:", err.message);
       });
@@ -130,6 +123,28 @@ app.post("/api/create-payment-intent", ensureAuthenticated, async (req, res) => 
     res.json({ clientSecret: paymentIntent.client_secret });
   } catch (err) {
     console.error("Payment intent error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ========== ADD CREDITS AFTER PAYMENT (FIX) ==========
+app.post("/api/add-credits", ensureAuthenticated, async (req, res) => {
+  try {
+    const { credits: creditsToAdd } = req.body;
+    if (!creditsToAdd || isNaN(creditsToAdd)) {
+      return res.status(400).json({ error: "Invalid credits amount" });
+    }
+    if (!db) return res.status(503).json({ error: "Firestore not available" });
+    
+    const userId = req.user.uid;
+    const userRef = db.collection("users").doc(userId);
+    await userRef.update({
+      credits: admin.firestore.FieldValue.increment(Number(creditsToAdd))
+    });
+    const updated = await userRef.get();
+    res.json({ success: true, credits: updated.data().credits });
+  } catch (err) {
+    console.error("Add credits error:", err);
     res.status(500).json({ error: err.message });
   }
 });
