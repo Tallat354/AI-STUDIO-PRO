@@ -21,64 +21,80 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 if (process.env.FAL_KEY) fal.config({ credentials: process.env.FAL_KEY });
 
 // -----------------------------
-// Firebase Admin – collection "users"
+// Firebase Admin initialization (with more logging)
 // -----------------------------
 let db = null;
 let adminAuth = null;
+let firebaseProjectId = null;
 try {
   const raw = process.env.FIREBASE_CONFIG;
-  if (raw) {
-    const config = JSON.parse(raw);
-    admin.initializeApp({ credential: admin.credential.cert(config) });
-    db = admin.firestore();
-    adminAuth = admin.auth();
-    console.log("✅ Firebase Admin connected. Project:", config.project_id);
-  }
+  if (!raw) throw new Error("FIREBASE_CONFIG missing");
+  // Remove any possible BOM or extra whitespace
+  const cleanRaw = raw.trim();
+  const config = JSON.parse(cleanRaw);
+  if (!config.project_id) throw new Error("No project_id in config");
+  firebaseProjectId = config.project_id;
+  admin.initializeApp({ credential: admin.credential.cert(config) });
+  db = admin.firestore();
+  adminAuth = admin.auth();
+  console.log(`✅ Firebase Admin connected. Project ID: ${firebaseProjectId}`);
 } catch (err) {
-  console.error("❌ Firebase init error:", err.message);
+  console.error("❌ Firebase init ERROR:", err.message);
+  console.error("   Please check FIREBASE_CONFIG environment variable");
 }
 
-// 🔥 Create user document ONLY if not exists (never overwrite)
+// Helper – ensure user doc with 20 credits
 async function ensureUserDocument(uid) {
   if (!db) throw new Error("Firestore not available");
   const userRef = db.collection("users").doc(uid);
   const doc = await userRef.get();
   if (!doc.exists) {
-    // First time – set initial credits, no subscription
     await userRef.set({
       credits: 20,
       lastDailyClaim: null,
       subscription: { plan: "free", expiry: null },
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
-    console.log(`✅ Created new user ${uid} with 20 credits, free plan`);
+    console.log(`✅ Created user ${uid} with 20 credits`);
     return { credits: 20, subscription: { plan: "free", expiry: null } };
   }
   return doc.data();
 }
 
-// 🔥 Middleware – ensures user exists and attaches user data to req
+// Middleware (with full error reporting)
 async function ensureAuthenticated(req, res, next) {
   if (req.method === "OPTIONS") return next();
-  if (!adminAuth) return res.status(503).json({ error: "Auth not ready" });
+  if (!adminAuth) {
+    return res.status(503).json({ error: "Firebase Auth not configured" });
+  }
   const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith("Bearer "))
-    return res.status(401).json({ error: "No token" });
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "No token provided" });
+  }
   const token = authHeader.split(" ")[1];
   try {
+    // Verify token with checkRevoked = true
     const decoded = await adminAuth.verifyIdToken(token, true);
     req.user = decoded;
     req.userData = await ensureUserDocument(decoded.uid);
     next();
   } catch (err) {
-    console.error("❌ Token verify failed:", err.code, err.message);
-    res.status(401).json({ error: "Invalid token", details: err.message });
+    console.error("❌ Token verification FAILED:");
+    console.error("   Error code:", err.code);
+    console.error("   Error message:", err.message);
+    console.error("   Full error:", err);
+    // Send detailed response for debugging
+    res.status(401).json({
+      error: "Invalid token",
+      code: err.code,
+      details: err.message,
+      hint: "Make sure frontend and backend use the SAME Firebase project, and token is fresh."
+    });
   }
 }
 
 // -----------------------------
-// 🔐 GET /api/user – return current user's credits & subscription
-// Frontend login ke baad yeh call karega
+// 🔥 GET /api/user – return user data
 // -----------------------------
 app.get("/api/user", ensureAuthenticated, (req, res) => {
   res.json({
@@ -90,34 +106,27 @@ app.get("/api/user", ensureAuthenticated, (req, res) => {
 });
 
 // -----------------------------
-// 💰 Daily Reward (24h cooldown) – updates Firestore
+// 💰 Daily Reward
 // -----------------------------
 app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
   if (!db) return res.status(503).json({ error: "Firestore not available" });
   try {
     const uid = req.user.uid;
     const userRef = db.collection("users").doc(uid);
-    const userData = req.userData; // from middleware
-
-    let last = userData.lastDailyClaim?.toDate?.()?.getTime() || null;
+    const data = req.userData;
+    let last = data.lastDailyClaim?.toDate?.()?.getTime() || null;
     const now = Date.now();
     const day = 24 * 60 * 60 * 1000;
     if (last && now - last < day) {
       const hours = Math.ceil((day - (now - last)) / (60 * 60 * 1000));
       return res.status(400).json({ error: `Already claimed. Try in ${hours} hours` });
     }
-
-    // Update credits (+10) and lastDailyClaim
     await userRef.update({
       credits: admin.firestore.FieldValue.increment(10),
       lastDailyClaim: admin.firestore.FieldValue.serverTimestamp(),
     });
     const updated = await userRef.get();
-    res.json({
-      success: true,
-      credits: updated.data().credits,
-      message: "+10 credits claimed!",
-    });
+    res.json({ success: true, credits: updated.data().credits, message: "+10 credits" });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -125,7 +134,7 @@ app.post("/api/daily-reward", ensureAuthenticated, async (req, res) => {
 });
 
 // -----------------------------
-// 💳 Stripe Payment – add purchased credits and update subscription
+// 💳 Stripe Payment Intent
 // -----------------------------
 app.post("/api/create-payment-intent", ensureAuthenticated, async (req, res) => {
   try {
@@ -143,12 +152,9 @@ app.post("/api/create-payment-intent", ensureAuthenticated, async (req, res) => 
   }
 });
 
-// After successful payment, frontend calls this endpoint to add credits & subscription
 app.post("/api/confirm-payment", ensureAuthenticated, async (req, res) => {
-  const { credits, planName, paymentIntentId } = req.body;
-  if (!credits || !planName) {
-    return res.status(400).json({ error: "Missing data" });
-  }
+  const { credits, planName } = req.body;
+  if (!credits || !planName) return res.status(400).json({ error: "Missing data" });
   try {
     const uid = req.user.uid;
     const userRef = db.collection("users").doc(uid);
@@ -156,18 +162,13 @@ app.post("/api/confirm-payment", ensureAuthenticated, async (req, res) => {
     if (planName === "weekly") expiry.setDate(expiry.getDate() + 7);
     else if (planName === "15days") expiry.setDate(expiry.getDate() + 15);
     else if (planName === "monthly") expiry.setMonth(expiry.getMonth() + 1);
-    else expiry.setDate(expiry.getDate() + 30); // default
-
+    else expiry.setDate(expiry.getDate() + 30);
     await userRef.update({
       credits: admin.firestore.FieldValue.increment(credits),
       subscription: { plan: planName, expiry: expiry.toISOString() },
     });
     const updated = await userRef.get();
-    res.json({
-      success: true,
-      credits: updated.data().credits,
-      subscription: updated.data().subscription,
-    });
+    res.json({ success: true, credits: updated.data().credits, subscription: updated.data().subscription });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -175,15 +176,13 @@ app.post("/api/confirm-payment", ensureAuthenticated, async (req, res) => {
 });
 
 // -----------------------------
-// 🎨 AI Generate – deduct 1 credit
+// 🎨 AI Generate (deduct 1 credit)
 // -----------------------------
 app.post("/api/generate", ensureAuthenticated, async (req, res) => {
   try {
     const { prompt, style } = req.body;
     if (!prompt) return res.status(400).json({ error: "Prompt required" });
-    if (req.userData.credits < 1) {
-      return res.status(400).json({ error: "Insufficient credits" });
-    }
+    if (req.userData.credits < 1) return res.status(400).json({ error: "Insufficient credits" });
     const styleMap = {
       realistic: "ultra realistic DSLR photo, 8k",
       cinematic: "cinematic movie scene, dramatic lighting",
@@ -197,10 +196,7 @@ app.post("/api/generate", ensureAuthenticated, async (req, res) => {
     });
     const imageUrl = result?.data?.images?.[0]?.url || result?.images?.[0]?.url;
     if (!imageUrl) return res.status(500).json({ error: "No image URL" });
-    // Deduct credit
-    await db.collection("users").doc(req.user.uid).update({
-      credits: admin.firestore.FieldValue.increment(-1),
-    });
+    await db.collection("users").doc(req.user.uid).update({ credits: admin.firestore.FieldValue.increment(-1) });
     res.json({ success: true, imageUrl });
   } catch (err) {
     console.error(err);
@@ -209,7 +205,7 @@ app.post("/api/generate", ensureAuthenticated, async (req, res) => {
 });
 
 // -----------------------------
-// ✏️ Face Edit – deduct 2 credits
+// ✏️ Face Edit (deduct 2 credits)
 // -----------------------------
 function shouldPreserveHairstyle(p) {
   const kw = ["change hair", "different hair", "new hair", "different hairstyle"];
@@ -219,9 +215,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 app.post("/api/edit", ensureAuthenticated, upload.single("image"), async (req, res) => {
   try {
     if (!req.file || !req.body.prompt) return res.status(400).json({ error: "Image and prompt required" });
-    if (req.userData.credits < 2) {
-      return res.status(400).json({ error: "Need 2 credits" });
-    }
+    if (req.userData.credits < 2) return res.status(400).json({ error: "Need 2 credits" });
     const preserve = shouldPreserveHairstyle(req.body.prompt);
     const hairInstr = preserve ? "preserve exact hairstyle" : "change hairstyle as described";
     const buffer = await sharp(req.file.buffer).resize(1024, 1024, { fit: "cover" }).jpeg({ quality: 100 }).toBuffer();
@@ -235,9 +229,7 @@ app.post("/api/edit", ensureAuthenticated, upload.single("image"), async (req, r
     });
     const imageUrl = result?.data?.image?.url || result?.data?.images?.[0]?.url;
     if (!imageUrl) return res.status(500).json({ error: "No edited image" });
-    await db.collection("users").doc(req.user.uid).update({
-      credits: admin.firestore.FieldValue.increment(-2),
-    });
+    await db.collection("users").doc(req.user.uid).update({ credits: admin.firestore.FieldValue.increment(-2) });
     res.json({ success: true, imageUrl });
   } catch (err) {
     console.error(err);
